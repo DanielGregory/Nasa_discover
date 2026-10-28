@@ -1,0 +1,6 @@
+target,planet,tic_id,known_period_days,min_period,notes
+Pi Men,Pi Men c,261136679,6.2678,,Super-Earth around a bright G star; first TESS planet (~300 ppm depth)
+WASP-18,WASP-18 b,100100827,0.94145,0.3,Massive hot Jupiter (~1% depth)
+WASP-126,WASP-126 b,25155310,3.2888,,Hot Jupiter in the TESS continuous viewing zone
+WASP-121,WASP-121 b,22529346,1.27492,0.3,Inflated hot Jupiter
+LHS 3844,LHS 3844 b,410153553,0.46293,0.3,Ultra-short-period rocky planet around an M dwarf (~30 min transit)
