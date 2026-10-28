@@ -158,6 +158,23 @@ dialog img { display: block; max-width: 100%; height: auto; }
 dialog button { position: absolute; top: 8px; right: 8px; border: 0; border-radius: 999px; width: 36px; height: 36px;
   background: var(--ink); color: var(--bg); font-size: 1.1rem; cursor: pointer; }
 
+.tabs { display: flex; gap: 4px; margin-top: 14px; border-bottom: 1px solid var(--rule); }
+.tab { border: 0; background: none; color: var(--ink-2); font: 600 0.92rem var(--font-body);
+  padding: 8px 14px; border-bottom: 2px solid transparent; cursor: pointer; margin-bottom: -1px; }
+.tab[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); }
+.scoreboard { display: flex; flex-wrap: wrap; gap: 8px 22px; align-items: baseline; margin: 4px 0 2px;
+  font: 500 0.82rem var(--font-data); color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.scoreboard b { font: 400 1.9rem var(--font-display); color: var(--ink); margin-right: 4px; }
+.scoreboard button { border: 1px solid var(--rule); background: var(--surface); color: var(--ink-2);
+  font: 500 0.75rem var(--font-body); padding: 4px 10px; border-radius: 999px; cursor: pointer; }
+.reveal { border-top: 1px solid var(--rule); padding: 12px 16px 14px; display: flex; flex-direction: column; gap: 6px; }
+.reveal .result { font: 600 0.95rem var(--font-body); }
+.reveal .result.right { color: var(--good); }
+.reveal .result.wrong { color: var(--bad); }
+.reveal p { margin: 0; color: var(--ink-2); font-size: 0.9rem; }
+.guess-row { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.v-btn[data-pick="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+
 @media (prefers-reduced-motion: no-preference) {
   .card { transition: border-color 0.2s; }
 }
@@ -166,10 +183,26 @@ dialog button { position: absolute; top: 8px; right: 8px; border: 0; border-radi
 <div class="wrap">
   <header class="top">
     <h1>Discovery Queue</h1>
-    <p>Candidates from Claude's searches of public NASA data. Most will be false alarms. Mark the ones worth a closer look, and Claude follows up on those.</p>
+    <p>Candidates from Claude's searches of public NASA data. Most will be false alarms. Mark the ones worth a closer look, and Claude follows up on those. Practise on known answers in Training.</p>
     <div class="tally" id="tally"><span>Loading…</span></div>
+    <div class="tabs" role="tablist">
+      <button class="tab" role="tab" id="tab-queue" type="button" aria-selected="true">Queue</button>
+      <button class="tab" role="tab" id="tab-training" type="button" aria-selected="false">Training</button>
+    </div>
   </header>
 
+  <section id="training-view" hidden>
+    <div class="filters">
+      <div class="scoreboard" id="scoreboard"></div>
+      <div class="chips" id="training-chips" aria-label="Kind"></div>
+    </div>
+    <main class="grid" id="training-feed" aria-live="polite">
+      <div class="empty"><h2>Loading practice examples…</h2>
+        <p>Examples where the answer is already known, shown without labels. Make your call, then see the answer and why.</p></div>
+    </main>
+  </section>
+
+  <section id="queue-view">
   <div class="filters" role="toolbar" aria-label="Filters">
     <div class="chips" id="kind-chips" aria-label="Kind"></div>
     <div class="chips" id="state-chips" aria-label="Review state"></div>
@@ -182,6 +215,7 @@ dialog button { position: absolute; top: 8px; right: 8px; border: 0; border-radi
       <p>Candidates appear here after each search run: TESS planet transits now, with comets, brown dwarfs and fast transients to follow.</p>
     </div>
   </main>
+  </section>
 </div>
 
 <dialog id="zoom"><button type="button" id="zoom-close" aria-label="Close">×</button><img id="zoom-img" alt=""></dialog>
@@ -388,6 +422,112 @@ function openZoom(src, title) {
 document.getElementById("zoom-close").addEventListener("click", () => document.getElementById("zoom").close());
 document.getElementById("zoom").addEventListener("click", (e) => { if (e.target.id === "zoom") e.target.close(); });
 
+// ---------------------------------------------------------------- Training
+const training = { items: [], guesses: {}, kind: "all" };
+const TRAINING_KINDS = [["all", "All"], ["planet", "Planets"], ["comet", "Comets"], ["brown_dwarf", "Brown dwarfs"]];
+const QUESTION = {
+  planet: [["yes", "Planet"], ["no", "Not a planet"]],
+  comet: [["yes", "Comet"], ["no", "Not a comet"]],
+  brown_dwarf: [["yes", "Brown dwarf"], ["no", "Not one"]],
+};
+
+function showView(name) {
+  const isTraining = name === "training";
+  document.getElementById("training-view").hidden = !isTraining;
+  document.getElementById("queue-view").hidden = isTraining;
+  document.getElementById("tally").hidden = isTraining;
+  document.getElementById("tab-queue").setAttribute("aria-selected", String(!isTraining));
+  document.getElementById("tab-training").setAttribute("aria-selected", String(isTraining));
+  if (location.hash !== (isTraining ? "#training" : "")) {
+    history.replaceState(null, "", isTraining ? "#training" : location.pathname + location.search);
+  }
+}
+document.getElementById("tab-queue").addEventListener("click", () => showView("queue"));
+document.getElementById("tab-training").addEventListener("click", () => showView("training"));
+window.addEventListener("hashchange", () => showView(location.hash === "#training" ? "training" : "queue"));
+
+function renderTrainingChips() {
+  document.getElementById("training-chips").replaceChildren(...TRAINING_KINDS
+    .filter(([v]) => v === "all" || training.items.some((t) => t.kind === v))
+    .map(([value, label]) => el("button", {
+      class: "chip", type: "button", "aria-pressed": String(training.kind === value), text: label,
+      onclick: () => { training.kind = value; renderTrainingChips(); renderTraining(); },
+    })));
+}
+
+function renderScoreboard() {
+  const answered = training.items.filter((t) => training.guesses[t.id]);
+  const right = answered.filter((t) => training.guesses[t.id].correct).length;
+  const byKind = Object.keys(QUESTION).map((k) => {
+    const a = answered.filter((t) => t.kind === k);
+    return a.length ? `${KIND_LABEL[k]}s ${a.filter((t) => training.guesses[t.id].correct).length}/${a.length}` : null;
+  }).filter(Boolean);
+  const board = document.getElementById("scoreboard");
+  board.replaceChildren(
+    el("span", {}, el("b", { text: answered.length ? `${Math.round(100 * right / answered.length)}%` : "–" }),
+      `${right} of ${answered.length} right`),
+    el("span", { text: `${training.items.length - answered.length} to go` }),
+    byKind.length ? el("span", { text: byKind.join(" · ") }) : null,
+    answered.length && state.canWrite ? el("button", { type: "button", text: "Start over", onclick: resetTraining }) : null,
+  );
+}
+
+async function resetTraining() {
+  if (!state.db) return;
+  for (const id of Object.keys(training.guesses)) {
+    try { await state.db.doc("training_guesses/" + id).delete(); } catch (e) {}
+  }
+}
+
+function trainingCard(t) {
+  const g = training.guesses[t.id];
+  const plotSrc = t.plot_asset ? "/_blob/" + t.plot_asset : null;
+  const options = QUESTION[t.kind] || [["yes", "Yes"], ["no", "No"]];
+  const pick = async (value) => {
+    if (!state.db || g) return;
+    try {
+      await state.db.doc("training_guesses/" + t.id).set({
+        guess: value, correct: value === t.answer, kind: t.kind, at: new Date().toISOString(),
+      });
+    } catch (e) { showBanner("Couldn't save your answer: " + (e && e.message ? e.message : "try again")); }
+  };
+  const answerLabel = (options.find(([v]) => v === t.answer) || [, t.answer])[1];
+  return el("article", { class: "card", id: "t-" + t.id },
+    el("div", { class: "card-head" },
+      el("div", { class: "meta" }, el("span", { class: "kind " + t.kind, text: KIND_LABEL[t.kind] || t.kind }),
+        el("span", { text: t.source || "" })),
+      el("h2", { text: t.title }),
+      t.prompt ? el("p", { class: "subtitle", text: t.prompt }) : null,
+    ),
+    plotSrc ? el("div", { class: "plot" }, el("button", { type: "button", "aria-label": "Enlarge plot",
+      onclick: () => openZoom(plotSrc, t.title) }, el("img", { src: plotSrc, alt: "Practice plot " + t.title, loading: "lazy" }))) : null,
+    Array.isArray(t.stats) && t.stats.length ? el("div", { class: "body" }, el("dl", { class: "stats" },
+      t.stats.map((s) => el("div", {}, el("dt", { text: s.label }), el("dd", { text: String(s.value) }))))) : null,
+    g
+      ? el("div", { class: "reveal" },
+          el("div", { class: "result " + (g.correct ? "right" : "wrong"),
+            text: (g.correct ? "Right: " : "Not quite: ") + answerLabel }),
+          t.answer_detail ? el("p", { text: t.answer_detail }) : null,
+          t.explanation ? el("p", { text: t.explanation }) : null)
+      : el("div", { class: "verdict" }, el("div", { class: "guess-row", role: "group", "aria-label": "Your call" },
+          options.map(([value, label]) => el("button", { class: "v-btn", type: "button", text: label,
+            disabled: !state.canWrite, onclick: () => pick(value) })))),
+  );
+}
+
+function renderTraining() {
+  renderScoreboard();
+  const feed = document.getElementById("training-feed");
+  const shown = training.items.filter((t) => training.kind === "all" || t.kind === training.kind)
+    .sort((a, b) => (training.guesses[a.id] ? 1 : 0) - (training.guesses[b.id] ? 1 : 0) || (a.order ?? 0) - (b.order ?? 0));
+  if (!shown.length) {
+    feed.replaceChildren(el("div", { class: "empty" }, el("h2", { text: "No practice examples yet" }),
+      el("p", { text: "Claude adds labelled examples here: real planets and comets, and the artifacts that imitate them." })));
+    return;
+  }
+  feed.replaceChildren(...shown.map(trainingCard));
+}
+
 function showBanner(text) {
   const b = document.getElementById("banner");
   b.textContent = text; b.hidden = !text;
@@ -420,9 +560,20 @@ async function start() {
     state.verdicts = next;
     if (gotCandidates) renderFeed();
   }, () => {});
+  db.collection("training").limit(500).onSnapshot((snap) => {
+    training.items = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    renderTrainingChips(); renderTraining();
+  }, () => {});
+  db.collection("training_guesses").limit(1000).onSnapshot((snap) => {
+    const next = {};
+    for (const d of snap.docs) next[d.id] = d.data();
+    training.guesses = next;
+    renderTraining();
+  }, () => {});
 }
 
 renderChips();
+showView(location.hash === "#training" ? "training" : "queue");
 if (window.claude && claude.use) start();
 else { state.loaded = true; showBanner("Open this page on claude.ai to load candidates."); renderFeed(); }
 </script>
