@@ -350,6 +350,23 @@ need their own runs.
   A signal on a known host *at a different period* is reported as a possible
   extra planet, not rejected. A match on a nearby star flags contamination.
 
+## Other-sectors check (before anything reaches the queue)
+
+A "possible new" signal is searched again, blind, with the full pipeline in
+TESS sectors that weren't used to find it (back-to-back sectors joined).
+It only becomes a card if the same period comes out on top again, or, for
+stars with no other sectors, if its SNR is at least 10.
+
+| Star | Result |
+|---|---|
+| Pi Men c, WASP-126 b, LHS 3844 b (real) | confirmed in other sectors |
+| TIC 394015919, TIC 111265988 (first-batch candidates) | not confirmed: absent where expected at SNR 13–30 |
+| TIC 138762614 (first batch) | single sector, SNR 8.2: held back |
+
+A first attempt measured the deepest dip near the period with a free phase.
+It "confirmed" noise and rejected Pi Men c, because it always finds the
+biggest systematic. The blind re-search is the fair test.
+
 ## Discovery Queue (phone review)
 
 `../feed/discovery_queue.html` is published as a private claude.ai page.
