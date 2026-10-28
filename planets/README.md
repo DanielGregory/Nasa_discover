@@ -277,30 +277,44 @@ Then it runs the **unchanged** production search on every one.
 
 ![Recovery vs planet radius](docs/injection_recovery_vs_radius.png)
 
-**Results** (one sector, P = 0.5–13 d):
+**Results** (one sector, P = 0.5–13 d, current pipeline):
 
 | | Solar twin | 1.3 R☉ G dwarf | M dwarf |
 |---|---|---|---|
-| 50% recovery radius | 1.5 R⊕ | 1.85 R⊕ | **0.58 R⊕** |
-| 50% recovery radius, P < 3 d | 1.3 R⊕ | 1.5 R⊕ | 0.5 R⊕ |
-| 50% recovery at expected SNR | 9.2 | 9.8 | 8.2 |
+| 50% recovery radius | 1.45 R⊕ | 1.72 R⊕ | **0.58 R⊕** |
+| 50% recovery radius, P < 3 d | 1.19 R⊕ | 1.42 R⊕ | 0.50 R⊕ |
+| 50% recovery at expected SNR | 8.6 | 8.5 | 8.0 |
 | Recovered at expected SNR > 15 | 100% | 100% | 100% |
 
 What this tells us:
-- **No strong signal was missed.** All 788 injections with expected SNR > 15
-  came back at the right period and transit times. Misses happen only near
-  the detection threshold, where they should.
+- **No strong signal was missed.** Every injection with expected SNR > 15
+  (519 of them) came back at the right period and transit times. Misses
+  happen only near the detection threshold, where they should.
 - **M dwarfs are where small planets are findable.** The noise level is the
-  same, but the star is 2.3× smaller, so an Earth-sized planet makes a ~6× deeper
-  dip. Around this M dwarf, the pipeline finds 80% of 0.8 R⊕ planets. Around
-  the solar twin it finds almost none.
+  same, but the star is 2.3× smaller, so an Earth-sized planet makes a ~6×
+  deeper dip. Around this M dwarf, the pipeline finds 85% of 0.7–0.9 R⊕
+  planets. Around the solar twin it finds 4%.
 - **A "nothing found" is now quantified.** With one sector of this solar
-  twin, we'd have caught 85% of 2 R⊕ planets with P < 13 d and almost all
-  planets bigger than 3 R⊕.
-- **Where sensitivity is lost.** Recovery reaches 50% at expected SNR ~9,
-  not at the threshold of 7. Detection uses blind flattening, which shrinks
-  dips by ~20–25% (see [the pipeline steps](#the-pipeline-step-by-step)).
-  Recovering that safely would lower the detection limit.
+  twin, we'd have caught 91% of ~2 R⊕ planets with P < 13 d and every
+  planet bigger than 3 R⊕.
+- **Choosing the SDE threshold with data.** Near the threshold, most
+  injections the search *found at the right period* were thrown out only
+  because SDE was below 9. Using the near-zero-depth injections as
+  pure-noise trials (105 of them), we compared cut-offs:
+
+  | SDE ≥ | 9 | 8 | 7.5 | 7 |
+  |---|---|---|---|---|
+  | False alarms on noise | 0% | 0% | 0% | 2% |
+  | Recovery at SNR 7–15 | 65% | 71% | 73% | 78% |
+
+  We use **SDE ≥ 8**: a clear gain with margin before false alarms appear.
+  Noisier, more active stars will produce more false alarms than these quiet
+  ones, so the margin is deliberate.
+- **The flattening change didn't move these numbers** (1.54 → 1.56 R⊕ on
+  the solar twin before the threshold change, i.e. noise). The old
+  flattening's steps hurt variable stars and multi-planet systems, not single
+  planets on quiet stars. The new trend fit is still worth it for those
+  cases, as the two-planet regression test shows.
 
 <details><summary>Per-star maps (period × radius)</summary>
 
@@ -309,11 +323,13 @@ What this tells us:
 
 </details>
 
-**Bugs this test found** (both fixed, with regression tests):
+**Bugs these tests found** (all fixed, with regression tests):
 1. BLS fit 8-hour boxes to ~1-day periods, which outscored real short-period
    transits. Fix: durations are capped at 15% of the period.
 2. The masked second pass searched again and could "re-discover" pass-1
    noise. Fix: pass 2 only measures; it never searches.
+3. lightkurve's `flatten()` created 500–1000 ppm steps beside transits,
+   which produced a false period in a two-planet test. Fix: `robust_trend`.
 
 Caveats: the injections go into PDCSAP flux, which NASA has already
 detrended. So this tests our pipeline, not NASA's detrending, and it is a

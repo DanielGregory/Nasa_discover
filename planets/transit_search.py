@@ -30,9 +30,13 @@ from astropy.timeseries import BoxLeastSquares
 # period planets around small stars can be under an hour.
 DEFAULT_DURATIONS = np.array([0.5, 1, 1.5, 2, 3, 4, 5, 6, 8]) / 24.0
 
-# Rough "is this worth a closer look" thresholds. They're conventions, not
-# laws: SDE ~ 7-9 and SNR ~ 7 are typical cut-offs in TESS/Kepler searches.
-MIN_SDE = 9.0
+# "Is this worth a closer look" thresholds. SDE ~ 7-9 and SNR ~ 7 are
+# typical cut-offs in TESS/Kepler searches. We chose SDE 8 from our own
+# injection tests: on 105 pure-noise trials, SDE >= 7.5 still gave no false
+# alarms (SDE >= 7 gave 2%), while going from 9 to 8 raised recovery of
+# near-threshold planets (SNR 7-15) from 65% to 71%. Most misses at 9 were
+# found at the right period but cut by SDE alone.
+MIN_SDE = 8.0
 MIN_SNR = 7.0
 
 # Longest transit we'll consider, as a fraction of the orbital period.
