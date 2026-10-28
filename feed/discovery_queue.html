@@ -1,0 +1,428 @@
+<title>Discovery Queue</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a single column of candidate cards, like pages in an observing log,
+   with a sticky filter bar. Phone first; widens to two columns on desktop. */
+:root {
+  --bg: #eef1f4;          /* plate-glass grey with a cool bias */
+  --surface: #ffffff;
+  --ink: #142030;
+  --ink-2: #4a5768;
+  --ink-3: #7a8696;
+  --rule: #d6dce4;
+  --accent: #2456c9;      /* signal blue */
+  --accent-soft: #e3eafb;
+  --planet: #2456c9;
+  --comet: #b86a00;
+  --dwarf: #8a3fb8;
+  --transient: #c2185b;
+  --good: #1e7d4f;
+  --good-soft: #dcf1e6;
+  --bad: #b3261e;
+  --bad-soft: #f9e0de;
+  --meh: #6b6f76;
+  --meh-soft: #e7e8ea;
+  --font-display: "Instrument Serif", Georgia, "Times New Roman", serif;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-data: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0d1520; --surface: #152131; --ink: #e6ecf3; --ink-2: #a9b5c4; --ink-3: #7c8a9b;
+    --rule: #26354a; --accent: #7aa2ff; --accent-soft: #1d2e4d;
+    --planet: #7aa2ff; --comet: #f0a640; --dwarf: #c79af0; --transient: #f27aa6;
+    --good: #5ccf97; --good-soft: #163a2a; --bad: #ff8a80; --bad-soft: #43201e;
+    --meh: #b0b5bd; --meh-soft: #2a3340;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0d1520; --surface: #152131; --ink: #e6ecf3; --ink-2: #a9b5c4; --ink-3: #7c8a9b;
+  --rule: #26354a; --accent: #7aa2ff; --accent-soft: #1d2e4d;
+  --planet: #7aa2ff; --comet: #f0a640; --dwarf: #c79af0; --transient: #f27aa6;
+  --good: #5ccf97; --good-soft: #163a2a; --bad: #ff8a80; --bad-soft: #43201e;
+  --meh: #b0b5bd; --meh-soft: #2a3340;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink);
+  font: 15px/1.5 var(--font-body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 0 48px;
+}
+body::before {
+  content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px);
+  z-index: 10; background: var(--bg);
+}
+.wrap { max-width: 1100px; margin: 0 auto; }
+
+header.top { padding-block: 22px 6px; }
+header.top h1 {
+  font: 400 2.3rem/1.05 var(--font-display); margin: 0; letter-spacing: 0.005em;
+  text-wrap: balance;
+}
+header.top p { margin: 6px 0 0; color: var(--ink-2); max-width: 62ch; }
+
+.tally { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 12px;
+  font: 500 0.82rem var(--font-data); color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.tally b { color: var(--ink); font-weight: 500; }
+
+.filters {
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5;
+  background: var(--bg); padding-block: 10px; border-bottom: 1px solid var(--rule);
+  display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px;
+}
+.chips { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
+.chips::-webkit-scrollbar { display: none; }
+.chip {
+  flex: none; border: 1px solid var(--rule); background: var(--surface); color: var(--ink-2);
+  font: 500 0.82rem var(--font-body); padding: 6px 12px; border-radius: 999px; cursor: pointer;
+}
+.chip[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.chip:focus-visible, button:focus-visible, textarea:focus-visible, a:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px;
+}
+
+.grid { display: grid; grid-template-columns: 1fr; gap: 16px; }
+@media (min-width: 880px) { .grid { grid-template-columns: 1fr 1fr; } }
+
+.card {
+  background: var(--surface); border: 1px solid var(--rule); border-radius: 10px;
+  overflow: hidden; display: flex; flex-direction: column; min-width: 0;
+}
+.card-head { padding: 14px 16px 10px; display: flex; flex-direction: column; gap: 6px; }
+.meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  font: 500 0.75rem var(--font-data); color: var(--ink-3); letter-spacing: 0.02em; }
+.kind {
+  font: 600 0.7rem var(--font-body); letter-spacing: 0.08em; text-transform: uppercase;
+  padding: 2px 8px; border-radius: 4px; border: 1px solid currentColor;
+}
+.kind.planet { color: var(--planet); } .kind.comet { color: var(--comet); }
+.kind.brown_dwarf { color: var(--dwarf); } .kind.transient { color: var(--transient); }
+.status-tag { padding: 2px 8px; border-radius: 4px; background: var(--meh-soft); color: var(--ink-2); }
+.status-tag.new { background: var(--accent-soft); color: var(--accent); }
+.card h2 { margin: 0; font: 400 1.55rem/1.15 var(--font-display); overflow-wrap: anywhere; }
+.subtitle { margin: 0; color: var(--ink-2); font-size: 0.92rem; }
+
+.score { display: flex; align-items: center; gap: 10px; font: 500 0.78rem var(--font-data);
+  color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.score-bar { flex: 1; height: 6px; border-radius: 3px; background: var(--rule); overflow: hidden; max-width: 220px; }
+.score-bar span { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
+
+.plot { background: #fff; border-block: 1px solid var(--rule); }
+.plot img { display: block; width: 100%; height: auto; }
+.plot button { all: unset; display: block; width: 100%; cursor: zoom-in; }
+.plot-missing { padding: 28px 16px; text-align: center; color: var(--ink-3); font-size: 0.85rem; background: var(--bg); }
+
+.body { padding: 12px 16px 16px; display: flex; flex-direction: column; gap: 12px; }
+.summary { margin: 0; color: var(--ink); }
+dl.stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 10px 14px; margin: 0; }
+dl.stats div { min-width: 0; }
+dl.stats dt { font: 600 0.68rem var(--font-body); letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink-3); }
+dl.stats dd { margin: 2px 0 0; font: 500 0.92rem var(--font-data); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.notes { margin: 0; padding: 8px 10px; border-left: 3px solid var(--rule); color: var(--ink-2); font-size: 0.88rem; }
+.links { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 0.85rem; }
+.links a { color: var(--accent); text-decoration: none; border-bottom: 1px solid var(--accent-soft); }
+
+.verdict { border-top: 1px solid var(--rule); padding: 12px 16px 14px; display: flex; flex-direction: column; gap: 8px; background: var(--surface); }
+.verdict-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.v-btn {
+  border: 1px solid var(--rule); background: var(--surface); color: var(--ink);
+  font: 600 0.85rem var(--font-body); padding: 10px 6px; border-radius: 8px; cursor: pointer;
+  min-height: 44px;
+}
+.v-btn[data-v="worth"][aria-pressed="true"] { background: var(--good-soft); border-color: var(--good); color: var(--good); }
+.v-btn[data-v="not"][aria-pressed="true"] { background: var(--bad-soft); border-color: var(--bad); color: var(--bad); }
+.v-btn[data-v="unsure"][aria-pressed="true"] { background: var(--meh-soft); border-color: var(--meh); color: var(--ink); }
+.v-btn:disabled { opacity: 0.55; cursor: default; }
+textarea {
+  width: 100%; min-height: 44px; resize: vertical; border: 1px solid var(--rule); border-radius: 8px;
+  background: var(--bg); color: var(--ink); font: 0.9rem/1.4 var(--font-body); padding: 8px 10px;
+}
+.save-line { display: flex; justify-content: space-between; align-items: center; gap: 8px;
+  font: 0.75rem var(--font-data); color: var(--ink-3); min-height: 1.2em; }
+
+.empty { background: var(--surface); border: 1px dashed var(--rule); border-radius: 10px; padding: 28px 20px; color: var(--ink-2); }
+.empty h2 { font: 400 1.5rem var(--font-display); margin: 0 0 6px; color: var(--ink); }
+.empty p { margin: 0; max-width: 60ch; }
+.banner { padding: 10px 12px; border-radius: 8px; background: var(--bad-soft); color: var(--bad); font-size: 0.88rem; margin-bottom: 12px; }
+
+dialog { border: 0; padding: 0; max-width: min(1200px, 96vw); background: var(--surface); border-radius: 10px; }
+dialog::backdrop { background: rgb(0 0 0 / 0.7); }
+dialog img { display: block; max-width: 100%; height: auto; }
+dialog button { position: absolute; top: 8px; right: 8px; border: 0; border-radius: 999px; width: 36px; height: 36px;
+  background: var(--ink); color: var(--bg); font-size: 1.1rem; cursor: pointer; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .card { transition: border-color 0.2s; }
+}
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <h1>Discovery Queue</h1>
+    <p>Candidates from Claude's searches of public NASA data. Most will be false alarms. Mark the ones worth a closer look, and Claude follows up on those.</p>
+    <div class="tally" id="tally"><span>Loading…</span></div>
+  </header>
+
+  <div class="filters" role="toolbar" aria-label="Filters">
+    <div class="chips" id="kind-chips" aria-label="Kind"></div>
+    <div class="chips" id="state-chips" aria-label="Review state"></div>
+  </div>
+
+  <div id="banner" class="banner" hidden></div>
+  <main class="grid" id="feed" aria-live="polite">
+    <div class="empty">
+      <h2>Connecting to the queue…</h2>
+      <p>Candidates appear here after each search run: TESS planet transits now, with comets, brown dwarfs and fast transients to follow.</p>
+    </div>
+  </main>
+</div>
+
+<dialog id="zoom"><button type="button" id="zoom-close" aria-label="Close">×</button><img id="zoom-img" alt=""></dialog>
+
+<script>
+const KINDS = [
+  ["all", "All"], ["planet", "Planets"], ["comet", "Comets"],
+  ["brown_dwarf", "Brown dwarfs"], ["transient", "Transients"],
+];
+const STATES = [
+  ["todo", "To review"], ["worth", "Worth a look"], ["unsure", "Unsure"], ["not", "Not real"], ["any", "Everything"],
+];
+const KIND_LABEL = { planet: "Planet", comet: "Comet", brown_dwarf: "Brown dwarf", transient: "Transient" };
+const VERDICTS = [["worth", "Worth a look"], ["unsure", "Unsure"], ["not", "Not real"]];
+
+const state = {
+  kind: "all", review: "todo",
+  candidates: [], verdicts: {}, canWrite: true, db: null, loaded: false,
+  drafts: {},   // unsaved note text per candidate, kept across re-renders
+};
+try {
+  const saved = JSON.parse(localStorage.getItem("dq-filters") || "{}");
+  if (saved.kind) state.kind = saved.kind;
+  if (saved.review) state.review = saved.review;
+} catch (e) {}
+
+function el(tag, attrs = {}, ...kids) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (v === undefined || v === null || v === false) continue;
+    if (k === "class") node.className = v;
+    else if (k === "text") node.textContent = v;
+    else if (k.startsWith("on")) node.addEventListener(k.slice(2), v);
+    else node.setAttribute(k, v === true ? "" : v);
+  }
+  for (const kid of kids.flat()) if (kid) node.append(kid);
+  return node;
+}
+
+function renderChips() {
+  const make = (box, list, key) => {
+    box.replaceChildren(...list.map(([value, label]) => el("button", {
+      class: "chip", type: "button", "aria-pressed": String(state[key] === value), text: label,
+      onclick: () => {
+        state[key] = value;
+        try { localStorage.setItem("dq-filters", JSON.stringify({ kind: state.kind, review: state.review })); } catch (e) {}
+        renderChips(); renderFeed();
+      },
+    })));
+  };
+  make(document.getElementById("kind-chips"), KINDS, "kind");
+  make(document.getElementById("state-chips"), STATES, "review");
+}
+
+function verdictOf(id) { return state.verdicts[id]?.verdict || null; }
+
+function renderTally() {
+  const t = document.getElementById("tally");
+  if (!state.loaded) return;
+  const n = state.candidates.length;
+  const count = (v) => state.candidates.filter((c) => verdictOf(c.id) === v).length;
+  const todo = state.candidates.filter((c) => !verdictOf(c.id)).length;
+  t.replaceChildren(
+    el("span", {}, el("b", { text: String(n) }), " candidates"),
+    el("span", {}, el("b", { text: String(todo) }), " to review"),
+    el("span", {}, el("b", { text: String(count("worth")) }), " worth a look"),
+    el("span", {}, el("b", { text: String(count("not")) }), " not real"),
+  );
+}
+
+function fmtDate(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return isNaN(d) ? "" : d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
+
+function card(c) {
+  const v = state.verdicts[c.id] || {};
+  const score = Math.max(0, Math.min(1, Number(c.score) || 0));
+  const plotSrc = c.plot_asset ? "/_blob/" + c.plot_asset : null;
+
+  const plot = plotSrc
+    ? el("div", { class: "plot" }, el("button", {
+        type: "button", "aria-label": "Enlarge plot for " + (c.title || "candidate"),
+        onclick: () => openZoom(plotSrc, c.title),
+      }, el("img", { src: plotSrc, alt: "Diagnostic plot for " + (c.title || "candidate"), loading: "lazy",
+        onerror: (e) => e.target.closest(".plot").replaceWith(el("div", { class: "plot-missing", text: "Plot unavailable" })) })))
+    : null;
+
+  const stats = Array.isArray(c.stats) && c.stats.length
+    ? el("dl", { class: "stats" }, c.stats.map((s) => el("div", {}, el("dt", { text: s.label }), el("dd", { text: String(s.value) }))))
+    : null;
+
+  const links = Array.isArray(c.links) && c.links.length
+    ? el("div", { class: "links" }, c.links.filter((l) => /^https:\/\//.test(l.url || "")).map((l) =>
+        el("a", { href: l.url, target: "_blank", rel: "noopener", text: l.label })))
+    : null;
+
+  const note = el("textarea", {
+    id: "note-" + c.id, placeholder: "Notes (optional): what you noticed, why", rows: "2",
+    disabled: !state.canWrite,
+  });
+  note.value = state.drafts[c.id] ?? v.note ?? "";
+  note.addEventListener("input", () => { state.drafts[c.id] = note.value; });
+  const status = el("span", { text: v.updated_at ? "Saved " + fmtDate(v.updated_at) : "" });
+
+  const save = async (patch) => {
+    if (!state.db) return;
+    status.textContent = "Saving…";
+    try {
+      await state.db.doc("verdicts/" + c.id).set({
+        verdict: patch.verdict ?? verdictOf(c.id),
+        note: patch.note ?? note.value,
+        candidate_title: c.title || "",
+        updated_at: new Date().toISOString(),
+      });
+      if (patch.note !== undefined) delete state.drafts[c.id];
+      status.textContent = "Saved";
+    } catch (e) {
+      if (e && e.code === "invalid_argument") { state.canWrite = false; renderFeed(); }
+      status.textContent = "Couldn't save: " + (e && e.message ? e.message : "try again");
+    }
+  };
+
+  const buttons = VERDICTS.map(([value, label]) => el("button", {
+    class: "v-btn", type: "button", "data-v": value, "aria-pressed": String(v.verdict === value),
+    disabled: !state.canWrite, text: label,
+    onclick: () => save({ verdict: v.verdict === value ? null : value }),
+  }));
+  note.addEventListener("change", () => save({ note: note.value }));
+
+  const statusClass = c.vet_status === "possible new" ? "status-tag new" : "status-tag";
+
+  return el("article", { class: "card", id: "c-" + c.id },
+    el("div", { class: "card-head" },
+      el("div", { class: "meta" },
+        el("span", { class: "kind " + (c.kind || ""), text: KIND_LABEL[c.kind] || c.kind || "Candidate" }),
+        c.vet_status ? el("span", { class: statusClass, text: c.vet_status }) : null,
+        el("span", { text: [c.source, fmtDate(c.found_at)].filter(Boolean).join(" · ") }),
+      ),
+      el("h2", { text: c.title || c.id }),
+      c.subtitle ? el("p", { class: "subtitle", text: c.subtitle }) : null,
+      el("div", { class: "score", title: "Claude's ranking score, 0 to 1" },
+        el("span", { text: "score " + score.toFixed(2) }),
+        el("div", { class: "score-bar", role: "img", "aria-label": "Score " + score.toFixed(2) + " of 1" },
+          el("span", { style: "width:" + (score * 100).toFixed(0) + "%" })),
+      ),
+    ),
+    plot,
+    el("div", { class: "body" },
+      c.summary ? el("p", { class: "summary", text: c.summary }) : null,
+      stats,
+      c.notes ? el("p", { class: "notes", text: c.notes }) : null,
+      links,
+    ),
+    el("div", { class: "verdict" },
+      el("div", { class: "verdict-row", role: "group", "aria-label": "Your verdict" }, buttons),
+      note,
+      el("div", { class: "save-line" }, status),
+    ),
+  );
+}
+
+function renderFeed() {
+  renderTally();
+  const feed = document.getElementById("feed");
+  if (!state.loaded) return;
+  const shown = state.candidates
+    .filter((c) => state.kind === "all" || c.kind === state.kind)
+    .filter((c) => {
+      const v = verdictOf(c.id);
+      if (state.review === "any") return true;
+      if (state.review === "todo") return !v;
+      return v === state.review;
+    })
+    .sort((a, b) => (Number(b.score) || 0) - (Number(a.score) || 0) || String(b.found_at).localeCompare(String(a.found_at)));
+
+  if (!state.candidates.length) {
+    feed.replaceChildren(el("div", { class: "empty" },
+      el("h2", { text: "No candidates yet" }),
+      el("p", { text: "Claude adds candidates here after each search run. Check back after the next run." })));
+    return;
+  }
+  if (!shown.length) {
+    feed.replaceChildren(el("div", { class: "empty" },
+      el("h2", { text: state.review === "todo" ? "All caught up" : "Nothing here" }),
+      el("p", { text: state.review === "todo"
+        ? "You've reviewed every candidate in this view. Pick “Everything” to see them all."
+        : "No candidates match these filters." })));
+    return;
+  }
+  // Keep the focused element (e.g. a textarea being typed in) when re-rendering.
+  const focusedId = document.activeElement && document.activeElement.id;
+  feed.replaceChildren(...shown.map(card));
+  if (focusedId) document.getElementById(focusedId)?.focus();
+}
+
+function openZoom(src, title) {
+  const dlg = document.getElementById("zoom");
+  const img = document.getElementById("zoom-img");
+  img.src = src; img.alt = "Diagnostic plot for " + (title || "candidate");
+  if (dlg.showModal) dlg.showModal(); else window.open(src, "_blank");
+}
+document.getElementById("zoom-close").addEventListener("click", () => document.getElementById("zoom").close());
+document.getElementById("zoom").addEventListener("click", (e) => { if (e.target.id === "zoom") e.target.close(); });
+
+function showBanner(text) {
+  const b = document.getElementById("banner");
+  b.textContent = text; b.hidden = !text;
+}
+
+async function start() {
+  renderChips();
+  const db = await claude.use("db");
+  if (!db) {
+    state.loaded = true;
+    showBanner("The candidate store isn't available in this view. Open the page signed in to claude.ai.");
+    renderFeed();
+    return;
+  }
+  state.db = db;
+  const user = await claude.use("user");
+  if (user) {
+    const can = await user.can("data.write");
+    if (can === false) state.canWrite = false;
+  }
+  let gotCandidates = false;
+  db.collection("candidates").orderBy("score", "desc").limit(500).onSnapshot((snap) => {
+    state.candidates = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    gotCandidates = true; state.loaded = true;
+    renderFeed();
+  }, (e) => showBanner("Lost the connection to the candidate list. Reload to retry."));
+  db.collection("verdicts").limit(1000).onSnapshot((snap) => {
+    const next = {};
+    for (const d of snap.docs) next[d.id] = d.data();
+    state.verdicts = next;
+    if (gotCandidates) renderFeed();
+  }, () => {});
+}
+
+renderChips();
+if (window.claude && claude.use) start();
+else { state.loaded = true; showBanner("Open this page on claude.ai to load candidates."); renderFeed(); }
+</script>
