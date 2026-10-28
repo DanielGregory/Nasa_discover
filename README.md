@@ -4,15 +4,20 @@ A small, readable pipeline that downloads public NASA TESS light curves,
 cleans them, and searches for transiting planets with Box Least Squares
 (BLS).
 
-**Current goal: show that the pipeline recovers known planets.** Use it for discovery
-only after it reliably finds planets we already know about.
+**Status:** the pipeline recovers known planets, and injection-recovery
+tests have mapped what it can and can't find. Use it for discovery only
+after it has passed both tests.
 
 ```
 transit_search.py              the whole pipeline (download → clean → BLS → plots → CSV)
 validate_known_planets.py      runs the pipeline on known_planets.csv
 known_planets.csv              known planet hosts with their published periods
+injection_recovery.py          inject fake planets into real data, map what we recover
+run_injection_recovery.py      runs injection-recovery on quiet_stars.csv
+quiet_stars.csv                test stars with no signal of their own
 notebooks/01_recover_known_planet.ipynb   step-by-step walkthrough on Pi Mensae c
-tests/test_synthetic.py        offline tests: inject a fake transit, check we recover it
+notebooks/02_injection_recovery.ipynb     how sensitive is the search?
+tests/                         offline tests (synthetic transits, regression tests)
 ```
 
 ## Quick start
@@ -23,6 +28,7 @@ pip install -r requirements.txt
 
 pytest                                   # offline tests (~1 min)
 python validate_known_planets.py         # downloads TESS data, writes results/
+python run_injection_recovery.py         # sensitivity maps (~15 min per star, 4 cores)
 jupyter lab notebooks/                   # the walkthrough
 ```
 
@@ -91,12 +97,19 @@ one star's brightness over that time.
      spikes (cosmic rays, flares) hard but leave low points alone. A
      symmetric clip can delete the transit you are looking for.
 3. **Search** (`run_bls`). See below.
-4. **Two passes** (`search_light_curve`). Even a 1-day window partly
-   absorbs transits, so the depth comes out too small. After the first BLS
-   pass we know when the transits are. We mask them, flatten again so the
-   trend is fitted only to out-of-transit data, and search again. On
-   synthetic data this raises the measured depth from ~190 ppm to the true
-   300 ppm.
+4. **Detect, then measure** (`search_light_curve`). Even a 1-day window
+   partly absorbs transits, so blind flattening makes them look too
+   shallow (Pi Men c: 219 ppm blind vs. 276 ppm). So:
+   - *Pass 1 (detect)*: flatten blindly and run BLS. Period, t0, SDE and
+     `is_candidate` come from this pass **only**.
+   - *Pass 2 (measure)*: mask the pass-1 transits, flatten again so the
+     trend is fitted only to out-of-transit data, and re-measure depth, SNR
+     and odd/even **at the same ephemeris**.
+
+   Pass 2 must not search again. Under the mask, the trend is only
+   interpolated, which can bend the masked stretch up or down. A second
+   search then "re-discovers" whatever pass 1 picked, even noise.
+   Injection-recovery tests caught this (see below).
 5. **Plot** (`plot_diagnostics`). Four panels: raw, flattened (with
    predicted transit times), periodogram, folded light curve.
 
@@ -120,6 +133,14 @@ Why a box rather than a realistic transit shape? It is fast enough to test
 millions of combinations. It is also close enough to the real shape to find
 the signal. Detailed modelling (limb darkening, ingress/egress) comes later,
 once you have a candidate.
+
+**Physical durations only.** A transit can only last a small fraction of
+the orbit: at most ~12% at P = 0.5 d around a Sun-like star, and less at
+longer periods. If BLS may try any duration at any period, it will
+happily fit an 8-hour box to a 1-day "orbit". The long box catches lots of
+data and can outscore a real short transit. Injection tests caught this
+too, so `run_bls` only tries durations up to `MAX_DUTY_CYCLE` (15%) of
+the period.
 
 **The period grid.** Periods are spaced evenly in frequency, with spacing
 set by the shortest duration and the total time span. A longer time span
@@ -210,9 +231,8 @@ a TOI (TESS Object of Interest).
 
    All five match their published periods. The durations are coarse
    because they snap to the trial grid (0.5, 1, 1.5, 2, 3 … h).
-3. ☐ Inject fake transits into **real** light curves of quiet stars at
-   different depths and periods to measure the smallest signal the pipeline
-   can recover.
+3. ✅ Injection-recovery on real light curves of quiet stars. See
+   [Injection-recovery](#injection-recovery-what-could-we-have-found) below.
 4. ☐ Only then: run it on stars without known planets.
 
 ## Data and credits

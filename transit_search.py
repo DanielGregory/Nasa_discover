@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from types import SimpleNamespace
 
 import lightkurve as lk
 import matplotlib.pyplot as plt
@@ -33,6 +34,9 @@ DEFAULT_DURATIONS = np.array([0.5, 1, 1.5, 2, 3, 4, 5, 6, 8]) / 24.0
 # laws: SDE ~ 7-9 and SNR ~ 7 are typical cut-offs in TESS/Kepler searches.
 MIN_SDE = 9.0
 MIN_SNR = 7.0
+
+# Longest transit we'll consider, as a fraction of the orbital period.
+MAX_DUTY_CYCLE = 0.15
 
 
 # ---------------------------------------------------------------------------
@@ -132,9 +136,7 @@ def run_bls(lc, min_period=0.5, max_period=None, durations=DEFAULT_DURATIONS,
     if max_period is None:
         max_period = baseline / 2
 
-    # BLS needs every trial duration to be shorter than the shortest period.
-    durations = np.asarray(durations)
-    durations = durations[durations < min_period]
+    durations = np.sort(np.asarray(durations))
 
     bls = BoxLeastSquares(t, y, dy)
     periods = bls.autoperiod(durations, minimum_period=min_period,
@@ -146,31 +148,77 @@ def run_bls(lc, min_period=0.5, max_period=None, durations=DEFAULT_DURATIONS,
             "Use fewer/contiguous sectors, a narrower period range, or a "
             "larger frequency_factor.")
 
-    periodogram = bls.power(periods, durations, objective="likelihood")
+    periodogram = _bls_power_physical(bls, periods, durations)
 
     best = np.argmax(periodogram.power)
     period = periodogram.period[best]
     duration = periodogram.duration[best]
     t0 = periodogram.transit_time[best]
-    stats = bls.compute_stats(period, duration, t0)
 
     # Signal Detection Efficiency: how far the tallest peak stands above the
     # typical periodogram level, in standard deviations.
     power = periodogram.power
     sde = (power[best] - np.mean(power)) / np.std(power)
 
-    depth, depth_err = stats["depth"]
-    odd, odd_err = stats["depth_odd"]
-    even, even_err = stats["depth_even"]
-
     result = {
         "period_days": period,
         "t0_btjd": t0,
         "duration_hours": duration * 24,
-        "depth_ppm": depth * 1e6,
-        "depth_snr": depth / depth_err,
+        **transit_stats(lc, period, duration, t0),
         "sde": sde,
         "bls_power": power[best],
+        "n_points": len(t),
+        "baseline_days": baseline,
+    }
+    # The SNR used to *decide* whether this is a candidate.
+    result["detection_snr"] = result["depth_snr"]
+    result["is_candidate"] = bool(result["sde"] >= MIN_SDE
+                                  and result["detection_snr"] >= MIN_SNR)
+    return result, periodogram, bls
+
+
+def _bls_power_physical(bls, periods, durations, n_chunks=12):
+    """
+    Run BLS, but at each period only try durations a planet could have.
+
+    A transit can only last a small fraction of the orbit (the "duty
+    cycle"): about 4-12% at P = 0.5 d around a Sun-like star, and less at
+    longer periods. Without this limit, BLS happily fits an 8-hour box to
+    a 1-day period. A long box catches more data, so its score can beat
+    a real short transit. Injection tests caught exactly that.
+
+    astropy uses one duration list for every period, so we split the
+    period grid into chunks and give each chunk its own allowed durations.
+    """
+    edges = np.geomspace(periods.min(), periods.max(), n_chunks + 1)
+    chunk = np.clip(np.digitize(periods, edges) - 1, 0, n_chunks - 1)
+    parts = []
+    for k in range(n_chunks):
+        chunk_periods = periods[chunk == k]
+        if len(chunk_periods) == 0:
+            continue
+        allowed = durations[durations <= MAX_DUTY_CYCLE * chunk_periods.min()]
+        if len(allowed) == 0:
+            allowed = durations[:1]
+        parts.append(bls.power(chunk_periods, allowed, objective="likelihood"))
+
+    return SimpleNamespace(**{key: np.concatenate([part[key] for part in parts])
+                              for key in ("period", "power", "duration", "transit_time")})
+
+
+def transit_stats(lc, period, duration, t0):
+    """
+    Depth, SNR, transit count and odd/even depths of a box-shaped transit at
+    a *fixed* ephemeris (period, duration and t0 all in days).
+    """
+    bls = BoxLeastSquares(lc.time.value, lc.flux.value, lc.flux_err.value)
+    stats = bls.compute_stats(period, duration, t0)
+    depth, depth_err = stats["depth"]
+    odd, odd_err = stats["depth_odd"]
+    even, even_err = stats["depth_even"]
+    return {
+        "depth_ppm": depth * 1e6,
+        "depth_snr": depth / depth_err,
         "n_transits": int(np.sum(stats["per_transit_count"] > 0)),
         # Odd/even test: an eclipsing binary at 2x the true period shows
         # alternating deep (primary) and shallow (secondary) eclipses.
@@ -181,12 +229,7 @@ def run_bls(lc, min_period=0.5, max_period=None, durations=DEFAULT_DURATIONS,
         # so also report it as a fraction of the depth. EBs differ by tens
         # of percent; a few percent is usually systematics.
         "odd_even_diff_pct": 100 * abs(odd - even) / depth,
-        "n_points": len(t),
-        "baseline_days": baseline,
     }
-    result["is_candidate"] = bool(result["sde"] >= MIN_SDE
-                                  and result["depth_snr"] >= MIN_SNR)
-    return result, periodogram, bls
 
 
 # ---------------------------------------------------------------------------
@@ -268,27 +311,36 @@ def search_light_curve(lc, name="target", window_days=1.0, min_period=0.5,
     """
     Clean + search + plot an already-loaded LightCurve. Returns a dict.
 
-    Two passes:
-      1. Flatten blindly and run BLS to find the strongest signal.
-      2. Mask that signal's transits, flatten again (so the trend fit can't
-         partly absorb the dips), and re-run BLS. Pass 2 gives unbiased
-         depths; pass 1 alone tends to under-estimate them.
+    Two passes, with separate jobs:
+      1. Detect: flatten blindly and run BLS. The period, t0, SDE and
+         `detection_snr` (and so `is_candidate`) come from this pass only.
+      2. Measure: mask the transits found in pass 1, flatten again so the
+         trend fit can't partly absorb the dips, and re-measure depth, SNR
+         and odd/even at the *same* ephemeris. Blind flattening makes
+         transits look too shallow; this pass fixes that.
+
+    Pass 2 must not search again. Under the mask the trend is only
+    interpolated, which can bend the masked stretch up or down. A new search
+    would then "re-discover" whatever pass 1 picked, even noise. Injection-
+    recovery tests caught exactly that, so pass 2 only measures.
     """
     normalized, flattened = clean_light_curve(lc, window_days=window_days)
-    first, _, _ = run_bls(flattened, min_period=min_period,
-                          max_period=max_period, durations=durations)
-
-    transit_mask = normalized.create_transit_mask(
-        period=first["period_days"], transit_time=first["t0_btjd"],
-        duration=2 * first["duration_hours"] / 24)   # pad by 2x to be safe
-    if transit_mask.mean() > 0.3:
-        # A junk pass-1 "signal" (pure noise) can mask most of the data,
-        # leaving nothing to fit the trend with. Fall back to no mask.
-        transit_mask = None
-    normalized, flattened = clean_light_curve(lc, window_days=window_days,
-                                              transit_mask=transit_mask)
     result, periodogram, _ = run_bls(flattened, min_period=min_period,
                                      max_period=max_period, durations=durations)
+    result["depth_ppm_blind"] = result["depth_ppm"]
+
+    period = result["period_days"]
+    duration = result["duration_hours"] / 24
+    transit_mask = normalized.create_transit_mask(
+        period=period, transit_time=result["t0_btjd"],
+        duration=2 * duration)   # pad by 2x to be safe
+    # A long-duration junk signal can mask most of the data, leaving too
+    # little to fit the trend with; then keep the blind numbers.
+    if transit_mask.mean() <= 0.3:
+        normalized, flattened = clean_light_curve(lc, window_days=window_days,
+                                                  transit_mask=transit_mask)
+        result.update(transit_stats(flattened, period, duration, result["t0_btjd"]))
+
     result = {"target": name, **result}
 
     if plot_dir is not None or show:
