@@ -177,6 +177,10 @@ def run_bls(lc, min_period=0.5, max_period=None, durations=DEFAULT_DURATIONS,
         "depth_odd_ppm": odd * 1e6,
         "depth_even_ppm": even * 1e6,
         "odd_even_sigma": abs(odd - even) / np.hypot(odd_err, even_err),
+        # At very high SNR a tiny (harmless) difference can be many sigma,
+        # so also report it as a fraction of the depth. EBs differ by tens
+        # of percent; a few percent is usually systematics.
+        "odd_even_diff_pct": 100 * abs(odd - even) / depth,
         "n_points": len(t),
         "baseline_days": baseline,
     }
@@ -355,10 +359,11 @@ def search_many(targets, csv_path="results.csv", plot_dir="plots", **kwargs):
 def period_match(found, known, tolerance=0.01):
     """
     Compare a BLS period to a published one. Returns "match", "alias 2x",
-    "alias 1/2x" (BLS often locks onto a harmonic), or "miss".
+    "alias 1/2x" (BLS often locks onto a harmonic), "miss", or "" if there
+    is nothing to compare (e.g. the search failed).
     """
     if not (np.isfinite(found) and np.isfinite(known)):
-        return "miss"
+        return ""
     for ratio, label in ((1, "match"), (2, "alias 2x"), (0.5, "alias 1/2x")):
         if abs(found / (known * ratio) - 1) < tolerance:
             return label

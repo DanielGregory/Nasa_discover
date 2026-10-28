@@ -83,6 +83,6 @@ def test_search_many_writes_csv_and_records_errors(tmp_path, monkeypatch):
     ts.search_many(targets, csv_path=csv_path, plot_dir=tmp_path / "plots")
 
     table = pd.read_csv(csv_path).fillna("")
-    assert list(table["period_check"]) == ["match", "miss"]
+    assert list(table["period_check"]) == ["match", ""]
     assert table.loc[1, "error"].startswith("ValueError")
     assert (tmp_path / "plots" / "star_A.png").exists()

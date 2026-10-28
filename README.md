@@ -31,9 +31,13 @@ In Python:
 ```python
 import transit_search as ts
 
-result = ts.search_target("Pi Men", show=True)          # one star
-table  = ts.search_many(["Pi Men", "WASP-18"], csv_path="results.csv")  # many stars
+result = ts.search_target("TIC 261136679", show=True)    # Pi Mensae
+table  = ts.search_many(["TIC 261136679", "TIC 100100827"], csv_path="results.csv")
 ```
+
+Star names such as `"Pi Men"` also work, but lightkurve then needs MAST's
+name-lookup service (`mastresolver.stsci.edu`). TIC IDs skip that lookup, so they
+are more robust.
 
 Each CSV row contains the best period, mid-transit time (`t0_btjd`), duration,
 depth, depth SNR, SDE, number of transits, and odd/even depths. If you supply
@@ -131,6 +135,7 @@ stitching sectors from years apart is slow.
 | `depth_snr` | depth / uncertainty on depth | ≳ 7 interesting |
 | `n_transits` | individual transits that have data | ≥ 2 to know a period; ≥ 3 preferred |
 | `odd_even_sigma` | difference between odd- and even-numbered transit depths, in σ | ≳ 3 suspicious (see below) |
+| `odd_even_diff_pct` | the same difference as a % of the depth | ≳ 10–20% suspicious |
 
 `is_candidate` is `True` when SDE ≥ 9 and SNR ≥ 7. These are thresholds
 for "look closer", not proof.
@@ -146,7 +151,11 @@ common impostor.
   secondary eclipses have different depths. BLS often finds half the true
   period, which folds the two eclipses on top of each other. A large
   `odd_even_sigma` is a warning sign. Check the periodogram peak at 2P
-  as well.
+  as well. Read it together with `odd_even_diff_pct`: on the bright hot
+  Jupiters in our validation set, odd and even depths differ by only 2–5%
+  but that is 3–6σ, because at SNR ~500 even small systematics (such as a
+  transit cut off at the edge of a data gap) are "significant". A real EB
+  usually differs by tens of percent.
 - *Secondary eclipse.* Fold at the period and look at phase 0.5. A dip
   there means the companion emits its own light, so it is probably a star.
   (Very hot Jupiters can show a tiny secondary eclipse too, but only tens
@@ -189,8 +198,18 @@ a TOI (TESS Object of Interest).
 
 1. ✅ Offline: inject synthetic transits, check period/depth/duration come
    back (`pytest`).
-2. ☐ Run `validate_known_planets.py`: every planet in `known_planets.csv`
-   should come back as `match`.
+2. ✅ `validate_known_planets.py` on one TESS sector each:
+
+   | Planet | Published P (d) | BLS P (d) | Depth (ppm) | Duration (h) | SDE | SNR |
+   |---|---|---|---|---|---|---|
+   | Pi Men c | 6.2678 | 6.2687 | 276 | 3.0 | 19.6 | 65 |
+   | WASP-18 b | 0.94145 | 0.94149 | 9,773 | 2.0 | 15.8 | 686 |
+   | WASP-126 b | 3.2888 | 3.2880 | 6,532 | 3.0 | 15.4 | 126 |
+   | WASP-121 b | 1.27492 | 1.27513 | 13,193 | 3.0 | 13.9 | 474 |
+   | LHS 3844 b | 0.46293 | 0.46296 | 4,087 | 0.5 | 26.0 | 34 |
+
+   All five match their published periods. The durations are coarse
+   because they snap to the trial grid (0.5, 1, 1.5, 2, 3 … h).
 3. ☐ Inject fake transits into **real** light curves of quiet stars at
    different depths and periods to measure the smallest signal the pipeline
    can recover.

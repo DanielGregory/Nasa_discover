@@ -26,5 +26,5 @@ if __name__ == "__main__":
 
     columns = ["planet", "known_period_days", "period_days", "period_check",
                "depth_ppm", "duration_hours", "sde", "depth_snr",
-               "odd_even_sigma", "error"]
+               "odd_even_sigma", "odd_even_diff_pct", "error"]
     print(table[[c for c in columns if c in table.columns]].to_string(index=False))
