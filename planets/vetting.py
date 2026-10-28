@@ -62,6 +62,7 @@ def star_info(target):
         "tmag": float(row["Tmag"]), "teff": float(row["Teff"]),
         "stellar_radius": float(row["rad"]), "stellar_radius_err": float(row["e_rad"]),
         "stellar_mass": float(row["mass"]),
+        "stellar_density": float(row["rho"]),       # in solar units
         # TIC's estimate of the fraction of light in the aperture from other
         # stars, relative to the target (0 = isolated).
         "contamination_ratio": float(row["contratio"]),
@@ -174,6 +175,49 @@ def match_known(tic, period, ra, dec, known=None, radius_arcsec=NEIGHBOUR_RADIUS
     return on_star[is_same], on_star[~is_same], nearby_same
 
 
+def duration_check(period_days, duration_hours, stellar_density):
+    """
+    Is the transit duration possible for a planet around this star?
+    A central transit lasts ~13 h x (P / 1 yr)^(1/3) x density^(-1/3)
+    (Kepler's law; density in solar units). Grazing transits are shorter,
+    so only "much too long" is strong evidence; "very short" just needs a
+    grazing orbit and is worth noting.
+    """
+    if not np.isfinite(stellar_density) or stellar_density <= 0:
+        return ""
+    central = 13.0 * (period_days / 365.25) ** (1 / 3) * stellar_density ** (-1 / 3)
+    if duration_hours > 1.5 * central:
+        return (f"{duration_hours:.1f} h is too long for a planet here (max ~{central:.1f} h): "
+                "maybe a blended binary or wrong stellar parameters")
+    if duration_hours < 0.3 * central:
+        return f"{duration_hours:.1f} h is short (central transit ~{central:.1f} h): needs a grazing orbit"
+    return ""
+
+
+# ---------------------------------------------------------------------------
+# 4. Data artifacts
+# ---------------------------------------------------------------------------
+
+def artifact_reasons(result):
+    """
+    Reasons to think the signal is bad data rather than an astrophysical
+    dip, from transit_search.transit_quality(). Thresholds come from
+    looking at the impostors in our first real hunt.
+    """
+    reasons = []
+    if result.get("n_transits", 0) < 2:
+        reasons.append("only one transit has data")
+    if result.get("max_event_share", 0) > 0.7:
+        reasons.append(f"one transit carries {result['max_event_share']:.0%} of the signal")
+    if result.get("bad_data_fraction", 0) >= 0.5:
+        reasons.append("most transits sit at a data gap, sector edge or noisy stretch")
+    if result.get("median_mean_ratio", 1) < 0.5:
+        reasons.append("dip comes from a few extreme points, not a smooth transit")
+    if result.get("baseline_wiggle", 0) > 0.4:
+        reasons.append("the star varies at this period outside the 'transit' (pulsation or spots?)")
+    return reasons
+
+
 # ---------------------------------------------------------------------------
 # All checks together
 # ---------------------------------------------------------------------------
@@ -184,6 +228,8 @@ def vet(result, known=None):
     Returns a dict of vetting columns, including `vet_status`:
       known            matches a known planet/TOI/CTOI on this star
       known neighbour  matches a known signal on a nearby star (contamination)
+      artifact         bad data (one event, edge/noisy transits, spiky dip) or
+                       a wavy baseline (stellar variability, not a transit)
       not a planet     too big to be a planet, or odd/even depths differ
       possible new     a new signal (on a known host, says `vet_notes`)
       weak             doesn't pass the candidate thresholds
@@ -204,6 +250,12 @@ def vet(result, known=None):
         notes.append(f"{len(blenders)} neighbour(s) bright enough to cause the dip")
     if len(other):
         notes.append("star already hosts: " + ", ".join(other["name"].astype(str)))
+    artifact = artifact_reasons(result)
+    notes += artifact
+    duration_note = duration_check(result["period_days"], result["duration_hours"],
+                                   star["stellar_density"])
+    if duration_note:
+        notes.append(duration_note)
 
     if len(same):
         status = "known"
@@ -214,6 +266,8 @@ def vet(result, known=None):
                      + " on a nearby star")
     elif not result["is_candidate"]:
         status = "weak"
+    elif artifact:
+        status = "artifact"
     elif radius > MAX_PLANET_RADIUS_EARTH or "odd/even" in " ".join(notes):
         status = "not a planet"
     else:

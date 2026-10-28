@@ -43,3 +43,12 @@ def test_planet_radius_from_depth():
     # A 25% eclipse can't be a planet.
     radius, _ = v.planet_radius(250_000, 1.0)
     assert radius > v.MAX_PLANET_RADIUS_EARTH
+
+
+def test_duration_check():
+    # Earth-Sun: 13 h central transit.
+    assert v.duration_check(365.25, 13, 1.0) == ""
+    assert "too long" in v.duration_check(365.25, 25, 1.0)
+    assert "grazing" in v.duration_check(365.25, 2, 1.0)
+    # M dwarf (density 10), 9-day orbit: ~1.8 h central.
+    assert "too long" in v.duration_check(9, 4, 10.0)

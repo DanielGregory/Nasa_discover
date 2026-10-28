@@ -83,7 +83,9 @@ def hunt_one(target, kind):
     sectors = ",".join(str(s) for s in lc.meta.get("SECTORS", []))
     rows = []
     known = vetting.known_signals()
-    for result in ts.search_multi(lc, name=target, plot_dir=OUT / "plots"):
+    # min_period 0.3 d: ultra-short-period planets are common around M
+    # dwarfs, and starting at 0.5 d finds them at twice their period.
+    for result in ts.search_multi(lc, name=target, plot_dir=OUT / "plots", min_period=0.3):
         row = {**result, "kind": kind, "sectors": sectors, "error": ""}
         if result["is_candidate"]:
             try:
@@ -100,12 +102,18 @@ if __name__ == "__main__":
     parser.add_argument("--hosts", type=int, default=20)
     parser.add_argument("--fresh", type=int, default=20)
     parser.add_argument("--workers", type=int, default=4)
+    parser.add_argument("--targets", help="CSV with target,kind columns (e.g. a previous "
+                                          "signals.csv) instead of choosing new stars")
     args = parser.parse_args()
 
     OUT.mkdir(parents=True, exist_ok=True)
     known = vetting.known_signals()
-    targets = [(t, "host") for t in host_targets(args.hosts, known)]
-    targets += [(t, "fresh") for t in fresh_targets(args.fresh, known)]
+    if args.targets:
+        listed = pd.read_csv(args.targets).drop_duplicates("target")
+        targets = list(zip(listed["target"], listed["kind"]))
+    else:
+        targets = [(t, "host") for t in host_targets(args.hosts, known)]
+        targets += [(t, "fresh") for t in fresh_targets(args.fresh, known)]
     print(f"{len(targets)} targets", flush=True)
 
     rows, fresh_done = [], 0

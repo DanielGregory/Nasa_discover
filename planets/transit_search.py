@@ -307,6 +307,72 @@ def transit_stats(lc, period, duration, t0):
     }
 
 
+def transit_quality(lc, period, t0, duration, gap_days=0.5, edge_days=0.3, noisy=1.5):
+    """
+    Checks on the individual transits and the folded light curve, which
+    catch the commonest impostors in a real search (a strong period can come
+    from one or two bad stretches of data, or from stellar pulsations):
+
+      max_event_share    fraction of the total signal (SNR^2) in the single
+                         strongest transit. Near 1: one event (a glitch, a
+                         lone dip) is doing all the work.
+      bad_data_fraction  fraction of transits that sit within `edge_days`
+                         (+ half a duration) of a data gap or sector edge,
+                         where TESS data ramps, or in a stretch whose
+                         scatter is `noisy` x the typical (pointing jitter).
+      median_mean_ratio  in-transit median depth / mean depth. A real dip
+                         lowers every point (~1); a few extreme points give a
+                         deep mean but a shallow median (<< 1).
+      baseline_wiggle    scatter of the folded, binned light curve *outside*
+                         the transit, relative to the depth. A transit has a
+                         flat baseline (~0.1-0.2); pulsations or spots at the
+                         same period make it wavy (~0.5+).
+    """
+    t, f = lc.time.value, lc.flux.value
+    scatter = 1.4826 * np.median(np.abs(f - np.median(f)))
+    starts = np.concatenate([[t[0]], t[1:][np.diff(t) > gap_days]])
+    ends = np.concatenate([t[:-1][np.diff(t) > gap_days], [t[-1]]])
+    boundaries = np.concatenate([starts, ends])
+
+    n_first = np.floor((t[0] - t0) / period)
+    centres = t0 + period * np.arange(n_first, n_first + (t[-1] - t[0]) / period + 2)
+    snr2, bad, in_points = [], [], []
+    for tc in centres:
+        inside = np.abs(t - tc) < duration / 2
+        if inside.sum() < 3:
+            continue
+        depth = 1 - np.mean(f[inside])
+        snr2.append(max(depth, 0) ** 2 * inside.sum() / scatter ** 2)
+        near_edge = np.min(np.abs(boundaries - tc)) < edge_days + duration / 2
+        around = (np.abs(t - tc) < 0.5) & ~inside
+        local = 1.4826 * np.median(np.abs(f[around] - np.median(f[around]))) if around.sum() > 20 else scatter
+        bad.append(near_edge or local > noisy * scatter)
+        in_points.append(f[inside])
+    if not snr2:
+        return {"max_event_share": np.nan, "bad_data_fraction": np.nan,
+                "median_mean_ratio": np.nan, "baseline_wiggle": np.nan}
+    points = np.concatenate(in_points)
+    mean_depth = 1 - np.mean(points)
+
+    # Folded baseline: bin out-of-transit phases at the transit duration.
+    phase = ((t - t0) / period + 0.5) % 1 - 0.5           # -0.5..0.5, transit at 0
+    out = np.abs(phase * period) > duration
+    n_bins = max(int(period / duration), 4)
+    edges = np.linspace(-0.5, 0.5, n_bins + 1)
+    idx = np.digitize(phase[out], edges)
+    binned = np.array([np.mean(f[out][idx == k]) for k in range(1, n_bins + 1) if np.sum(idx == k) > 5])
+    noise_per_bin = scatter / np.sqrt(max(len(f[out]) / n_bins, 1))
+    # Subtract the scatter expected from noise alone, then compare to depth.
+    excess = np.sqrt(max(np.var(binned) - noise_per_bin ** 2, 0)) if len(binned) > 3 else 0.0
+
+    return {
+        "max_event_share": float(max(snr2) / max(sum(snr2), 1e-12)),
+        "bad_data_fraction": float(np.mean(bad)),
+        "median_mean_ratio": float((1 - np.median(points)) / mean_depth) if mean_depth > 0 else np.nan,
+        "baseline_wiggle": float(excess / mean_depth) if mean_depth > 0 else np.nan,
+    }
+
+
 # ---------------------------------------------------------------------------
 # 4. Plot
 # ---------------------------------------------------------------------------
@@ -434,6 +500,7 @@ def search_light_curve(lc, name="target", window_days=1.0, min_period=0.5,
     if (transit_mask | prior).mean() <= 0.3:
         flattened = flatten_and_drop_prior(transit_mask | prior)
         result.update(transit_stats(flattened, period, duration, result["t0_btjd"]))
+    result.update(transit_quality(flattened, period, result["t0_btjd"], duration))
 
     result = {"target": name, **result}
 
