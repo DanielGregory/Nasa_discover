@@ -94,28 +94,43 @@ one star's brightness over that time.
 2. **Clean** (`clean_light_curve`).
    - *Remove NaNs*: gaps and flagged cadences.
    - *Flatten*: stars vary on their own. Starspots rotate in and out of
-     view, and stars pulsate and flare. We fit a smooth Savitzky–Golay trend
-     and divide it out. The smoothing window must be **much longer than a
-     transit** (we use 1 day, against transits of a few hours). Otherwise the
-     filter follows the dip and erases it.
+     view, and stars pulsate and flare. At each moment we fit a curve
+     (quadratic) to the surrounding 1 day of data, then divide it out
+     (`robust_trend`). Three details matter:
+     - The fit is **robust**: points far from the curve, like a transit or a
+       flare, get little or no weight (Tukey's biweight, the method
+       Hippke et al. 2019 found best for transit searches).
+     - The window never crosses a data gap.
+     - Nothing is interpolated across gaps or masked points.
+
+     The window must be **much longer than a transit** (1 day, against
+     transits of a few hours), or the curve starts to follow the dip.
+     We first used lightkurve's Savitzky–Golay `flatten()`. Injection tests
+     showed it creates 500–1000 ppm steps next to transits: it splits the
+     data at every clipped point and replaces short pieces with a flat
+     level. That cost sensitivity and caused false periods.
    - *Clip outliers asymmetrically*: transits are dips, so we clip upward
      spikes (cosmic rays, flares) hard but leave low points alone. A
      symmetric clip can delete the transit you are looking for.
 3. **Search** (`run_bls`). See below.
-4. **Detect, then measure** (`search_light_curve`). Even a 1-day window
-   partly absorbs transits, so blind flattening makes them look too
-   shallow (Pi Men c: 219 ppm blind vs. 276 ppm). So:
+4. **Detect, then measure** (`search_light_curve`). Even a robust 1-day fit
+   bends slightly toward a shallow transit at its centre, so blind
+   flattening makes shallow transits look too shallow (Pi Men c: 219 ppm
+   blind vs. 267 ppm). So:
    - *Pass 1 (detect)*: flatten blindly and run BLS. Period, t0, SDE and
      `is_candidate` come from this pass **only**.
    - *Pass 2 (measure)*: mask the pass-1 transits, flatten again so the
      trend is fitted only to out-of-transit data, and re-measure depth, SNR
      and odd/even **at the same ephemeris**.
 
-   Pass 2 must not search again. Under the mask, the trend is only
-   interpolated, which can bend the masked stretch up or down. A second
-   search then "re-discovers" whatever pass 1 picked, even noise.
-   Injection-recovery tests caught this (see below).
-5. **Plot** (`plot_diagnostics`). Four panels: raw, flattened (with
+   Pass 2 must not search again: a search on data shaped by the pass-1
+   mask can "re-discover" whatever pass 1 picked, even noise.
+   Injection-recovery tests caught this with the old flattening.
+5. **More planets** (`search_multi`). After a detection, mask that signal's
+   transits (out of the trend fit, then out of the data) and search again,
+   up to three signals. This finds a second planet hiding behind a stronger
+   one, including next to an already-known planet.
+6. **Plot** (`plot_diagnostics`). Four panels: raw, flattened (with
    predicted transit times), periodogram, folded light curve.
 
 ## How Box Least Squares works
@@ -161,7 +176,7 @@ stitching sectors from years apart is slow.
 | `depth_snr` | depth / uncertainty on depth | ≳ 7 interesting |
 | `n_transits` | individual transits that have data | ≥ 2 to know a period; ≥ 3 preferred |
 | `odd_even_sigma` | difference between odd- and even-numbered transit depths, in σ | ≳ 3 suspicious (see below) |
-| `odd_even_diff_pct` | the same difference as a % of the depth | ≳ 10–20% suspicious |
+| `odd_even_diff_pct` | the same difference as a % of the depth | ≳ 20% suspicious (vetting flags > 20% and > 3σ) |
 
 `is_candidate` is `True` when SDE ≥ 9 and SNR ≥ 7. These are thresholds
 for "look closer", not proof.

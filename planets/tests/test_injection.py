@@ -36,9 +36,10 @@ def test_short_period_deep_planet_recovered():
     result = ts.search_light_curve(lc)
     assert ts.period_match(result["period_days"], 0.79975) == "match"
     assert result["is_candidate"]
-    # Pass 2 (masked flattening) should restore most of the depth that blind
-    # flattening removes at short periods.
-    assert result["depth_ppm"] > result["depth_ppm_blind"]
+    # Both passes should measure close to the injected depth (box-averaged
+    # over ingress/egress, so a little shallower).
+    assert 1200 < result["depth_ppm_blind"] < 1500
+    assert 1200 < result["depth_ppm"] < 1500
 
 
 def test_injections_classified():
@@ -48,3 +49,15 @@ def test_injections_classified():
     assert set(results["status"]) <= {"recovered", "alias", "other signal",
                                       "below threshold"}
     assert results["expected_snr"].notna().all()
+
+
+def test_search_multi_finds_second_planet():
+    """A deep planet shouldn't hide a shallower one at another period."""
+    lc = fake_light_curve(period=3.1, depth=2e-3, duration_days=2 / 24, noise=1e-4)
+    lc = ir.inject_transit(lc, period=7.7, t0=1327.2, depth=6e-4, duration=3 / 24)
+    results = ts.search_multi(lc, name="two planets")
+    found = [r["period_days"] for r in results if r["is_candidate"]]
+    assert len(found) >= 2
+    assert ts.period_match(found[0], 3.1) == "match"
+    assert ts.period_match(found[1], 7.7) == "match"
+    assert results[1]["signal"] == 2 and results[1]["target"] == "two planets"

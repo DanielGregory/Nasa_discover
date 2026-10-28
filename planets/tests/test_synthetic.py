@@ -41,9 +41,10 @@ def test_pure_noise_is_not_a_candidate():
     assert not result["is_candidate"]
 
 
-def test_masking_transits_preserves_depth_when_flattening():
-    """Why search_light_curve() does two passes: flattening without a
-    transit mask partly absorbs the dips; with the mask the depth survives."""
+def test_flattening_preserves_transit_depth():
+    """The robust trend shouldn't absorb transits, with or without a transit
+    mask, even on a spotted star with cosmic-ray spikes. (lightkurve's
+    Savitzky-Golay flatten() lost ~20-75% of the depth here.)"""
     lc = fake_light_curve(depth=1e-3, noise=1e-4)
     period, t0, duration = 6.27, 1326.5, 3 / 24
     phase = (lc.time.value - t0 + period / 2) % period - period / 2
@@ -58,8 +59,16 @@ def test_masking_transits_preserves_depth_when_flattening():
         keep = np.isin(lc.time.value, flat.time.value)
         return 1 - np.median(flat.flux.value[in_transit[keep]])
 
+    assert abs(measured_depth(blind) - 1e-3) < 1e-4
     assert abs(measured_depth(masked) - 1e-3) < 1e-4
-    assert measured_depth(blind) < measured_depth(masked)
+
+
+def test_trend_does_not_step_at_gaps():
+    """Each side of a data gap gets its own trend; no step leaks across."""
+    t = np.concatenate([np.arange(0, 5, 0.002), np.arange(6, 11, 0.002)])
+    flux = np.where(t < 5.5, 1.0, 1.01)          # offset after the gap
+    trend = ts.robust_trend(t, flux)
+    assert np.allclose(trend[t < 5.5], 1.0) and np.allclose(trend[t > 5.5], 1.01)
 
 
 def test_period_match_flags_aliases():

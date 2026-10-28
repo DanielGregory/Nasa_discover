@@ -77,11 +77,79 @@ def download_light_curve(target, sectors=None, max_sectors=1,
 # 2. Clean
 # ---------------------------------------------------------------------------
 
-def window_length_in_cadences(lc, window_days):
-    """Convert a smoothing window from days to an odd number of cadences."""
-    cadence_days = np.nanmedian(np.diff(lc.time.value))
-    n = int(round(window_days / cadence_days))
-    return n + 1 if n % 2 == 0 else n
+def robust_local_level(dt, values, degree=2, c=5.0, iterations=5):
+    """
+    The trend value at dt = 0 from a robust polynomial fit to (dt, values).
+
+    A quadratic (degree 2) follows curved stellar variability (starspots); a
+    plain average would sit above or below a curving trend. "Robust" means
+    iteratively reweighted with Tukey's biweight: points far from the fit
+    (a transit dip, a flare) get less weight, and beyond c x MAD none at
+    all. So a transit barely pulls the trend down and isn't partly erased.
+    """
+    X = np.vander(dt, degree + 1)        # columns: ..., dt, 1
+    weight = np.ones(len(values))
+    coeffs = np.zeros(degree + 1)
+    for _ in range(iterations):
+        sw = np.sqrt(weight)
+        coeffs, *_ = np.linalg.lstsq(X * sw[:, None], values * sw, rcond=None)
+        resid = values - X @ coeffs
+        mad = np.median(np.abs(resid[weight > 0]))
+        if mad == 0:
+            break
+        u = resid / (c * mad)
+        weight = np.where(np.abs(u) < 1, (1 - u ** 2) ** 2, 0.0)
+    return coeffs[-1]
+
+
+def robust_trend(time, flux, window_days=1.0, mask=None, gap_days=0.5):
+    """
+    The star's slow trend: at each moment, a robust quadratic fit to the
+    flux within +/- window_days/2, ignoring `mask`ed points (True = skip,
+    e.g. known transits).
+
+    Three choices matter:
+      - Robust (biweight weights), so transit dips don't drag the trend
+        down and get partly erased.
+      - The window never crosses a data gap. Each stretch of data is
+        handled on its own, so the two sides of a gap never mix.
+      - No interpolation across masked points or gaps. lightkurve's
+        Savitzky-Golay flatten() does both, and injection tests caught it
+        creating 500-1000 ppm steps next to transits.
+
+    For speed the trend is evaluated on a grid (every window/30) and
+    interpolated. The trend is smooth on that scale, so this costs nothing.
+    """
+    mask = np.zeros(len(time), dtype=bool) if mask is None else np.asarray(mask)
+    trend = np.full(len(time), np.nan)
+    half = window_days / 2
+    step = window_days / 30
+
+    # Split into segments at gaps.
+    breaks = np.where(np.diff(time) > gap_days)[0] + 1
+    for seg in np.split(np.arange(len(time)), breaks):
+        t, f, use = time[seg], flux[seg], ~mask[seg]
+        grid = np.arange(t[0], t[-1] + step, step)
+        values = np.full(len(grid), np.nan)
+        lo = np.searchsorted(t, grid - half)
+        hi = np.searchsorted(t, grid + half)
+        for i, (a, b) in enumerate(zip(lo, hi)):
+            keep = use[a:b]
+            if keep.sum() < 20:
+                continue
+            dt = t[a:b][keep] - grid[i]
+            # Near a segment edge the window is one-sided, and a curve fitted
+            # to one side bends to follow any dip there. Use a straight line
+            # unless there's data on both sides.
+            both_sides = min(np.sum(dt < 0), np.sum(dt > 0)) > 0.3 * len(dt) / 2
+            values[i] = robust_local_level(dt, f[a:b][keep], degree=2 if both_sides else 1)
+        good = np.isfinite(values)
+        if good.sum() >= 2:
+            trend[seg] = np.interp(t, grid[good], values[good])
+        else:
+            # Segment too short or fully masked: use its plain median.
+            trend[seg] = np.median(f[use]) if use.any() else np.median(f)
+    return trend
 
 
 def clean_light_curve(lc, window_days=1.0, sigma_upper=4.0, sigma_lower=20.0,
@@ -90,12 +158,13 @@ def clean_light_curve(lc, window_days=1.0, sigma_upper=4.0, sigma_lower=20.0,
     Returns (normalized, flattened) light curves.
 
     - Remove NaNs (gaps, flagged cadences) and normalise to median 1.
-    - Flatten: fit a smooth trend (Savitzky-Golay filter) and divide it out,
-      removing slow stellar variability (spots, rotation) while keeping
-      short dips. The window must be much longer than a transit (rule of
-      thumb: >= 3x the duration) or the filter will "eat" the transit.
-      `transit_mask` (boolean array, True = in transit) tells the filter to
-      ignore those points when fitting the trend; see search_light_curve().
+    - Flatten: estimate the star's slow trend with a sliding robust
+      quadratic fit (robust_trend) and divide it out. That removes stellar variability
+      (spots, rotation) while keeping short dips. The window must be much
+      longer than a transit (rule of thumb: >= 3x the duration) or the
+      trend starts to follow the transit.
+      `transit_mask` (boolean array, True = in transit) leaves those points
+      out of the trend estimate; see search_light_curve().
     - Clip outliers *after* flattening (on a variable star the spread before
       flattening is dominated by the variability, so spikes hide in it).
       Clip *asymmetrically*: transits are dips, so we aggressively clip
@@ -104,9 +173,11 @@ def clean_light_curve(lc, window_days=1.0, sigma_upper=4.0, sigma_lower=20.0,
     """
     normalized = lc.remove_nans().normalize()
 
-    window = window_length_in_cadences(normalized, window_days)
-    flattened = normalized.flatten(window_length=window, polyorder=2,
-                                   mask=transit_mask)
+    trend = robust_trend(normalized.time.value, normalized.flux.value,
+                           window_days=window_days, mask=transit_mask)
+    flattened = normalized.copy()
+    flattened.flux = normalized.flux / trend
+    flattened.flux_err = normalized.flux_err / trend
     flattened = flattened.remove_outliers(sigma_upper=sigma_upper,
                                           sigma_lower=sigma_lower)
     return normalized, flattened
@@ -305,9 +376,19 @@ def safe_filename(name):
     return re.sub(r"[^A-Za-z0-9_-]+", "_", name).strip("_")
 
 
+def signal_mask(lc, signals, pad=2.0):
+    """True for cadences inside any of `signals` [(period, t0, duration_days)],
+    with each transit window widened by `pad`."""
+    mask = np.zeros(len(lc), dtype=bool)
+    for period, t0, duration in signals:
+        mask |= lc.create_transit_mask(period=period, transit_time=t0,
+                                       duration=pad * duration)
+    return mask
+
+
 def search_light_curve(lc, name="target", window_days=1.0, min_period=0.5,
                        max_period=None, durations=DEFAULT_DURATIONS,
-                       plot_dir=None, show=False):
+                       mask_signals=(), plot_dir=None, show=False):
     """
     Clean + search + plot an already-loaded LightCurve. Returns a dict.
 
@@ -323,22 +404,31 @@ def search_light_curve(lc, name="target", window_days=1.0, min_period=0.5,
     interpolated, which can bend the masked stretch up or down. A new search
     would then "re-discover" whatever pass 1 picked, even noise. Injection-
     recovery tests caught exactly that, so pass 2 only measures.
+
+    `mask_signals` lists signals already found [(period, t0, duration_days)].
+    Their transits are kept out of the trend fit and then dropped before BLS,
+    so the search looks for something else (see search_multi).
     """
-    normalized, flattened = clean_light_curve(lc, window_days=window_days)
+    normalized = lc.remove_nans().normalize()
+    prior = signal_mask(normalized, mask_signals)
+
+    def flatten_and_drop_prior(transit_mask):
+        _, flat = clean_light_curve(lc, window_days=window_days,
+                                    transit_mask=transit_mask if transit_mask.any() else None)
+        return flat[~signal_mask(flat, mask_signals)]
+
+    flattened = flatten_and_drop_prior(prior)
     result, periodogram, _ = run_bls(flattened, min_period=min_period,
                                      max_period=max_period, durations=durations)
     result["depth_ppm_blind"] = result["depth_ppm"]
 
     period = result["period_days"]
     duration = result["duration_hours"] / 24
-    transit_mask = normalized.create_transit_mask(
-        period=period, transit_time=result["t0_btjd"],
-        duration=2 * duration)   # pad by 2x to be safe
+    transit_mask = signal_mask(normalized, [(period, result["t0_btjd"], duration)])
     # A long-duration junk signal can mask most of the data, leaving too
     # little to fit the trend with; then keep the blind numbers.
-    if transit_mask.mean() <= 0.3:
-        normalized, flattened = clean_light_curve(lc, window_days=window_days,
-                                                  transit_mask=transit_mask)
+    if (transit_mask | prior).mean() <= 0.3:
+        flattened = flatten_and_drop_prior(transit_mask | prior)
         result.update(transit_stats(flattened, period, duration, result["t0_btjd"]))
 
     result = {"target": name, **result}
@@ -364,6 +454,33 @@ def search_target(target, sectors=None, max_sectors=1, **kwargs):
     result = search_light_curve(lc, name=target, **kwargs)
     result["sectors"] = ",".join(str(s) for s in lc.meta.get("SECTORS", []))
     return result
+
+
+def search_multi(lc, name="target", max_signals=3, plot_dir=None, **kwargs):
+    """
+    Find up to `max_signals` periodic signals in one light curve.
+
+    After each detection, that signal's transits are masked and the search
+    runs again. This is how a second or third planet shows up: the strongest
+    signal (often an already-known planet) no longer hides the weaker ones.
+    Stops at the first search that isn't a candidate.
+
+    Returns a list of result dicts, with `signal` = 1, 2, 3...
+    """
+    results, found = [], []
+    for signal in range(1, max_signals + 1):
+        label = name if signal == 1 else f"{name} signal {signal}"
+        result = search_light_curve(lc, name=label, mask_signals=found,
+                                    plot_dir=plot_dir, **kwargs)
+        result.update(target=name, signal=signal)
+        results.append(result)
+        if not result["is_candidate"]:
+            break
+        found.append((result["period_days"], result["t0_btjd"],
+                      result["duration_hours"] / 24))
+        if signal_mask(lc.remove_nans(), found).mean() > 0.3:
+            break   # most of the data is masked; anything left is unreliable
+    return results
 
 
 def search_many(targets, csv_path="results.csv", plot_dir="plots", **kwargs):

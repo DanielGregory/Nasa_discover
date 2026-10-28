@@ -198,7 +198,7 @@ def vet(result, known=None):
     notes = []
     if radius > MAX_PLANET_RADIUS_EARTH:
         notes.append(f"radius {radius:.0f} R⊕ is too big for a planet")
-    if result["odd_even_sigma"] > 3 and result["odd_even_diff_pct"] > 10:
+    if result["odd_even_sigma"] > 3 and result["odd_even_diff_pct"] > 20:
         notes.append("odd/even depths differ (eclipsing binary at 2x period?)")
     if len(blenders):
         notes.append(f"{len(blenders)} neighbour(s) bright enough to cause the dip")
