@@ -7,3 +7,5 @@ results/
 cache/
 feed/outbox/
 !docs/*.png
+comets/cache/
+comets/results/
