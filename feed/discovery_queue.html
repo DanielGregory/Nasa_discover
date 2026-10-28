@@ -172,6 +172,18 @@ dialog button { position: absolute; top: 8px; right: 8px; border: 0; border-radi
 .reveal .result.right { color: var(--good); }
 .reveal .result.wrong { color: var(--bad); }
 .reveal p { margin: 0; color: var(--ink-2); font-size: 0.9rem; }
+.guide { background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; margin: 16px 0 6px; }
+.guide > summary { cursor: pointer; padding: 14px 16px; font: 400 1.35rem var(--font-display); list-style-position: inside; }
+.guide-body { padding: 0 16px 16px; display: flex; flex-direction: column; gap: 18px; }
+.guide h3 { margin: 6px 0 0; font: 600 0.78rem var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); }
+.guide figure { margin: 0; display: flex; flex-direction: column; gap: 8px; }
+.guide figure button { all: unset; cursor: zoom-in; display: block; }
+.guide figure img { display: block; width: 100%; height: auto; border: 1px solid var(--rule); border-radius: 6px; background: #fff; }
+.guide figcaption { color: var(--ink-2); font-size: 0.92rem; max-width: 70ch; }
+.guide figcaption b { color: var(--ink); }
+.guide ol { margin: 0; padding-left: 1.2em; color: var(--ink-2); font-size: 0.92rem; max-width: 70ch; }
+.guide-grid { display: grid; grid-template-columns: 1fr; gap: 18px; }
+@media (min-width: 880px) { .guide-grid { grid-template-columns: 1fr 1fr; } }
 .guess-row { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .v-btn[data-pick="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
 
@@ -192,6 +204,42 @@ dialog button { position: absolute; top: 8px; right: 8px; border: 0; border-radi
   </header>
 
   <section id="training-view" hidden>
+    <details class="guide" id="guide" open>
+      <summary>How to read the cards</summary>
+      <div class="guide-body">
+        <h3>Planets: read the panels in the order 2 → 4 → 1 → 3</h3>
+        <ol>
+          <li><b>Panel 2, flattened light curve:</b> is there a dip at <i>every</i> red line, all about the same depth? Cover the deepest one with your finger: is it still convincing?</li>
+          <li><b>Panel 4, folded transit:</b> flat outside, a clean flat-bottomed dip inside? Wavy baseline, a V shape, or a few stray dots are warning signs.</li>
+          <li><b>Panel 1, raw data:</b> an even band of noise? Watch for jittery stretches and ramps at the start, end or gap.</li>
+          <li><b>Panel 3, periodogram:</b> one tall, sharp spike (echoes at ½× and 2× are normal)? A messy forest or a comb of equal peaks is a warning.</li>
+        </ol>
+        <div class="guide-grid">
+          <figure><button type="button" data-zoom="/_blob/ed82aea4075c807faab717cd7ddc2aee"><img src="/_blob/ed82aea4075c807faab717cd7ddc2aee" alt="Annotated real planet, Pi Mensae c" loading="lazy"></button>
+            <figcaption><b>Real planet.</b> Same-depth dips at every red line, a flat-bottomed fold with a flat baseline, and one clear spike in the periodogram.</figcaption></figure>
+          <figure><button type="button" data-zoom="/_blob/c6641195df1cb0f5246a921f023154e8"><img src="/_blob/c6641195df1cb0f5246a921f023154e8" alt="Annotated glitch example" loading="lazy"></button>
+            <figcaption><b>Glitch.</b> One spike in a jittery stretch does all the work; the other red lines land on nothing. The fold is a few stray points.</figcaption></figure>
+          <figure><button type="button" data-zoom="/_blob/5521ffcd0c944b232004aa4b7741277f"><img src="/_blob/5521ffcd0c944b232004aa4b7741277f" alt="Annotated sector-edge example" loading="lazy"></button>
+            <figcaption><b>Edge ramp.</b> The "transits" sit exactly where the data starts and ends, and the middle one falls in the gap. TESS data often ramps at those edges.</figcaption></figure>
+          <figure><button type="button" data-zoom="/_blob/4f173d795b8ff49f772a983b3a379fb2"><img src="/_blob/4f173d795b8ff49f772a983b3a379fb2" alt="Annotated pulsating star example" loading="lazy"></button>
+            <figcaption><b>Pulsating star.</b> The folded baseline waves up and down; the "dip" is just one trough. The periodogram is a comb of equal peaks.</figcaption></figure>
+        </div>
+        <h3>Comets: check "Motion vs stars" first, then the close-ups</h3>
+        <ol>
+          <li><b>Motion vs stars near 0?</b> It moves with the star field, so it's a star, however good it looks.</li>
+          <li><b>Close-ups, in time order:</b> a dot inside the small circle in every frame (one faint frame is OK). If it drifts off-centre or the circle is empty, it isn't one object.</li>
+          <li><b>Direction:</b> most SOHO comets head toward the Sun (the + in the inset). Faint (about 5σ) is normal.</li>
+        </ol>
+        <div class="guide-grid">
+          <figure><button type="button" data-zoom="/_blob/224d212888b5b3cc9e57f301d2da46da"><img src="/_blob/224d212888b5b3cc9e57f301d2da46da" alt="Annotated real comet" loading="lazy"></button>
+            <figcaption><b>Real comet</b> (confirmed by a Sungrazer report). In the circle every frame, moving 14 px/h relative to the stars, toward the Sun.</figcaption></figure>
+          <figure><button type="button" data-zoom="/_blob/7426df92f356233c5f1ff0028d0b8e4f"><img src="/_blob/7426df92f356233c5f1ff0028d0b8e4f" alt="Annotated star track" loading="lazy"></button>
+            <figcaption><b>Star.</b> The close-ups look perfect, because the tracker follows the star too. Only "Motion vs stars ≈ 0" gives it away.</figcaption></figure>
+          <figure><button type="button" data-zoom="/_blob/b9c5449ab61746db8796652bdb6e1d6d"><img src="/_blob/b9c5449ab61746db8796652bdb6e1d6d" alt="Annotated false track" loading="lazy"></button>
+            <figcaption><b>False track.</b> The dot wanders around the circle from frame to frame next to a pair of stars, and heads away from the Sun.</figcaption></figure>
+        </div>
+      </div>
+    </details>
     <div class="filters">
       <div class="scoreboard" id="scoreboard"></div>
       <div class="chips" id="training-chips" aria-label="Kind"></div>
@@ -443,6 +491,13 @@ function showView(name) {
   }
 }
 document.getElementById("tab-queue").addEventListener("click", () => showView("queue"));
+document.querySelectorAll("[data-zoom]").forEach((b) =>
+  b.addEventListener("click", () => openZoom(b.dataset.zoom, b.querySelector("img").alt)));
+const guideEl = document.getElementById("guide");
+try { if (localStorage.getItem("dq-guide") === "closed") guideEl.open = false; } catch (e) {}
+guideEl.addEventListener("toggle", () => {
+  try { localStorage.setItem("dq-guide", guideEl.open ? "open" : "closed"); } catch (e) {}
+});
 document.getElementById("tab-training").addEventListener("click", () => showView("training"));
 window.addEventListener("hashchange", () => showView(location.hash === "#training" ? "training" : "queue"));
 

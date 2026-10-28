@@ -164,6 +164,8 @@ def track_figure(stack, diff, hours, frames, mover, sun_xy, path, n_cutouts=8, h
         sub.set_title(f"{frames['date'].iloc[i]:%H:%M}", fontsize=8)
         sub.axis("off")
     fig.tight_layout()
+    if path is None:
+        return fig          # caller annotates and saves (feed/build_guide.py)
     fig.savefig(path, dpi=90)
     plt.close(fig)
 

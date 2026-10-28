@@ -458,9 +458,10 @@ def signal_mask(lc, signals, pad=2.0):
 
 def search_light_curve(lc, name="target", window_days=1.0, min_period=0.5,
                        max_period=None, durations=DEFAULT_DURATIONS,
-                       mask_signals=(), plot_dir=None, show=False):
+                       mask_signals=(), plot_dir=None, show=False, return_figure=False):
     """
-    Clean + search + plot an already-loaded LightCurve. Returns a dict.
+    Clean + search + plot an already-loaded LightCurve. Returns a dict, or
+    (dict, Figure) with `return_figure=True` (for annotated guide images).
 
     Two passes, with separate jobs:
       1. Detect: flatten blindly and run BLS. The period, t0, SDE and
@@ -504,6 +505,8 @@ def search_light_curve(lc, name="target", window_days=1.0, min_period=0.5,
 
     result = {"target": name, **result}
 
+    if return_figure:
+        return result, plot_diagnostics(normalized, flattened, periodogram, result, title=name)
     if plot_dir is not None or show:
         fig = plot_diagnostics(normalized, flattened, periodogram, result, title=name)
         if plot_dir is not None:
