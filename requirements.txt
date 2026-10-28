@@ -1,7 +1,12 @@
+# Everything the searches and notebooks need.
 lightkurve>=2.4
 astropy>=6.0
+astroquery>=0.4.7
 numpy
+scipy
 pandas
 matplotlib
+requests
+pillow            # reads SOHO JPEG 2000 frames (the PyPI wheels include OpenJPEG)
 jupyter
 pytest

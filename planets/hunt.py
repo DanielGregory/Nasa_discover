@@ -33,10 +33,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "feed"))
 import candidates as cards  # noqa: E402
 
 OUT = Path("results/hunt")
+# Stars already hunted (committed to the repo, so scheduled runs move on).
+SEARCHED = Path(__file__).resolve().parent / "searched_stars.csv"
+
+
+def already_searched():
+    if not SEARCHED.exists():
+        return set()
+    return set(pd.read_csv(SEARCHED)["tic"].astype(int))
 SEND_TO_QUEUE = {"possible new", "not a planet", "known neighbour"}
 
 
-def host_targets(n, known):
+def host_targets(n, known, skip=frozenset()):
     """M dwarfs (Teff < 4000 K, T < 13) hosting exactly one known signal."""
     tois = pd.read_csv(vetting.CACHE_DIR / "tois.csv")
     extra = vetting._cached_csv("toi_stars", lambda: vetting._archive_query(
@@ -47,11 +55,12 @@ def host_targets(n, known):
     single = counts[counts == 1].index
     # Exclude stars whose only TOI is a known false positive.
     false_pos = set(tois.loc[tois["tfopwg_disp"].isin(["FP", "FA"]), "tid"])
-    stars = stars[stars["tid"].isin(single) & ~stars["tid"].isin(false_pos)]
+    stars = stars[stars["tid"].isin(single) & ~stars["tid"].isin(false_pos)
+                  & ~stars["tid"].isin(skip)]
     return [f"TIC {t}" for t in stars.sort_values("st_tmag")["tid"].head(n)]
 
 
-def fresh_targets(n, known, dec=(-90, -30), max_checked=200):
+def fresh_targets(n, known, skip=frozenset(), dec=(-90, -30), max_checked=1000):
     """
     Bright M dwarfs from the TIC with no known planet, TOI or CTOI, that
     have SPOC 2-minute data. Only TESS's pre-selected targets have 2-minute
@@ -63,7 +72,7 @@ def fresh_targets(n, known, dec=(-90, -30), max_checked=200):
     tic = Catalogs.query_criteria(catalog="TIC", Teff=[2800, 3900], rad=[0.1, 0.6],
                                   Tmag=[7, 12], lumclass="DWARF", objType="STAR",
                                   dec=list(dec)).to_pandas()
-    tic = tic[~tic["ID"].astype(int).isin(set(known["tic"]))].sort_values("Tmag")
+    tic = tic[~tic["ID"].astype(int).isin(set(known["tic"]) | set(skip))].sort_values("Tmag")
     picked = []
     for tic_id in tic["ID"].head(max_checked):
         target = f"TIC {tic_id}"
@@ -112,8 +121,9 @@ if __name__ == "__main__":
         listed = pd.read_csv(args.targets).drop_duplicates("target")
         targets = list(zip(listed["target"], listed["kind"]))
     else:
-        targets = [(t, "host") for t in host_targets(args.hosts, known)]
-        targets += [(t, "fresh") for t in fresh_targets(args.fresh, known)]
+        skip = already_searched()
+        targets = [(t, "host") for t in host_targets(args.hosts, known, skip)]
+        targets += [(t, "fresh") for t in fresh_targets(args.fresh, known, skip)]
     print(f"{len(targets)} targets", flush=True)
 
     rows, fresh_done = [], 0
@@ -130,6 +140,15 @@ if __name__ == "__main__":
 
     table = pd.DataFrame(rows)
     table.to_csv(OUT / "signals.csv", index=False)
+
+    # Remember which stars were searched successfully.
+    done = table[table["error"].fillna("") == ""].drop_duplicates("target")
+    record = pd.DataFrame({"tic": done["target"].str.replace("TIC", "").str.strip().astype(int),
+                           "kind": done["kind"], "sectors": done["sectors"],
+                           "searched": pd.Timestamp.now(tz="UTC").strftime("%Y-%m-%d")})
+    if SEARCHED.exists():
+        record = pd.concat([pd.read_csv(SEARCHED), record]).drop_duplicates("tic", keep="first")
+    record.to_csv(SEARCHED, index=False)
 
     ran = table[table["error"].fillna("") == ""].drop_duplicates("target")
     print(f"\nSearched {len(ran)} stars "
