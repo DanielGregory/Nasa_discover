@@ -192,7 +192,9 @@ def scan_chunk(frames, camera, reports):
         when = frames["date"].iloc[0] + pd.Timedelta(hours=float(m["t_ref"]))
         north_up = to_north_up(m["x_ref"], m["y_ref"], sun_xy, rotation)
         known = match_reports(when, north_up, reports, camera)
+        offset, centred = track.centring(diff, hours, m)
         rows.append({**m.drop(labels=["detections"]).to_dict(), "camera": camera, "time": when,
+                     "median_offset_px": offset, "frac_centred": centred,
                      "x_north_up": north_up[0], "y_north_up": north_up[1],
                      "r_sun": m["r_sun_px"] * r_sun_per_px,
                      "known_reports": ", ".join(known), "sun_x": sun_xy[0], "sun_y": sun_xy[1]})
@@ -202,6 +204,28 @@ def scan_chunk(frames, camera, reports):
         (OUT / "plots").mkdir(parents=True, exist_ok=True)
         track_figure(stack, diff, hours, frames, m, sun_xy, rows[-1]["plot"])
     return rows
+
+
+# What a mover needs before it reaches the Discovery Queue. Chosen from the
+# first reviews: every mover the person rejected was barely moving against
+# the stars, heading away from the Sun, or not staying on its track.
+MIN_SPEED_VS_STARS = 3.0      # px/h (C3); stars move ~0 relative to each other
+MIN_SUNWARD = 0.3             # most SOHO comets are sungrazers heading inward
+MAX_MEDIAN_OFFSET = 1.5       # px from the predicted track (see track.centring)
+MIN_FRAC_CENTRED = 0.7
+
+
+def hold_back_reasons(row):
+    """Why a mover should stay out of the queue (empty list = send it)."""
+    reasons = []
+    speed_floor = MIN_SPEED_VS_STARS * (soho.ARCSEC_PER_PIXEL["C3"] / soho.ARCSEC_PER_PIXEL[row["camera"]])
+    if row["speed_vs_stars"] < speed_floor:
+        reasons.append(f"barely moves against the stars ({row['speed_vs_stars']:.1f} px/h)")
+    if row["sunward"] < MIN_SUNWARD:
+        reasons.append(f"not heading toward the Sun (sunward {row['sunward']:+.2f})")
+    if not (row["median_offset_px"] <= MAX_MEDIAN_OFFSET) or row["frac_centred"] < MIN_FRAC_CENTRED:
+        reasons.append(f"doesn't stay on its track ({row['frac_centred']:.0%} of frames centred)")
+    return reasons
 
 
 def comet_card(row):
@@ -223,6 +247,7 @@ def comet_card(row):
             {"label": "Motion", "value": f"{row['speed_vs_stars']:.1f} px/h vs stars"},
             {"label": "Sunward", "value": f"{row['sunward']:+.2f}"},
             {"label": "Track scatter", "value": f"{row['rms_px']:.2f} px"},
+            {"label": "Stays on track", "value": f"{row['frac_centred']:.0%} of frames"},
             {"label": "Position (north-up)", "value": f"x {row['x_north_up']:.0f}, y {row['y_north_up']:.0f}"},
         ],
         "notes": (f"Matches {row['known_reports']}." if row["known_reports"] else
@@ -273,7 +298,12 @@ if __name__ == "__main__":
     table["bucket"] = [f"{r.time:%Y%m%d%H}-{int(r.x_north_up // 30)}-{int(r.y_north_up // 30)}" for r in table.itertuples()]
     table = table.drop_duplicates("bucket")
     table.to_csv(OUT / "movers.csv", index=False)
-    for _, row in table.iterrows():
+    table["hold_back"] = ["; ".join(hold_back_reasons(r)) for _, r in table.iterrows()]
+    table.to_csv(OUT / "movers.csv", index=False)
+    send = table[table["hold_back"] == ""]
+    for _, row in send.iterrows():
         cards.write_outbox(comet_card(row), row["plot"])
-    print(f"{len(table)} mover card(s) written to feed/outbox/ "
-          f"({(table['known_reports'] != '').sum()} match Sungrazer reports)")
+    print(f"{len(table)} mover(s); {len(send)} card(s) written to feed/outbox/ "
+          f"({(send['known_reports'] != '').sum()} match Sungrazer reports)")
+    for _, row in table[table["hold_back"] != ""].iterrows():
+        print(f"  held back {row['time']:%m-%d %H:%M} x{row['x_ref']:.0f} y{row['y_ref']:.0f}: {row['hold_back']}")

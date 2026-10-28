@@ -56,6 +56,23 @@ python scan.py --start 2026-10-23T00:00 --hours 10
    - Check: compare against recent Sungrazer reports (rotated to their
      north-up image frame), so already-reported comets are labelled.
 
+## What reaches the Discovery Queue
+
+From the first reviews, every mover the person rejected was barely moving
+against the stars, heading away from the Sun, or not staying on its track.
+So `scan.py` only makes cards for movers that:
+- move ≥ 3 px/h against the stars (C3; scaled for C2)
+- head toward the Sun (sunward ≥ 0.3)
+- stay on the track: in ≥ 70% of frames the brightest spot is within 2 px of
+  the predicted position (`track.centring`)
+
+On 23 Oct this keeps the real comet and holds back all four rejected
+movers. On 45 fake comets injected into the same frames, 84% of those the
+tracker found pass the rules; the losses are mostly fakes aimed well off
+the Sun's direction. Held-back movers are listed with their reasons in
+`results/movers.csv`. Comets genuinely moving away from the Sun (rare
+non-sungrazers) will be held back too.
+
 ## Validation
 
 **A real comet.** On 23 Oct 2026, Chuck Fields reported a Kreutz comet in

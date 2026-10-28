@@ -219,6 +219,69 @@ def artifact_reasons(result):
 
 
 # ---------------------------------------------------------------------------
+# 5. Does it come back in other TESS sectors?
+# ---------------------------------------------------------------------------
+
+def other_sectors_check(target, result, searched_sectors, max_groups=2):
+    """
+    The strongest test we can run ourselves: search TESS sectors that weren't
+    used for the detection, with the same full pipeline (artifact checks
+    included), and see whether the same period comes out on top.
+    Back-to-back sectors are joined, which doubles the data per search.
+
+    Returns (status, note):
+      "confirmed in other sectors"  the same period (or 2x / 1/2x) is found again
+      "not confirmed"               it should have been found but wasn't
+      "single sector"               no other 2-minute sectors exist
+      "inconclusive"                other sectors too short/noisy to tell
+
+    (We first tried measuring the deepest dip near the period with a free
+    phase. That always finds *something*: a systematic in Pi Men's other
+    sectors, noise in a quiet star. A full blind search is the fair test.)
+    """
+    import lightkurve as lk
+
+    found = lk.search_lightcurve(target, mission="TESS", author="SPOC", exptime=120)
+    sectors = sorted({int(m.split()[-1]) for m in found.table["mission"]} - set(searched_sectors))
+    if not sectors:
+        return "single sector", "TESS has no other 2-minute sectors of this star to check."
+
+    # Group consecutive sectors (e.g. 27+28), newest data last.
+    groups, current = [], [sectors[0]]
+    for s in sectors[1:]:
+        if s == current[-1] + 1 and len(current) < 2:
+            current.append(s)
+        else:
+            groups.append(current)
+            current = [s]
+    groups.append(current)
+    groups = sorted(groups, key=len, reverse=True)[:max_groups]
+
+    period = result["period_days"]
+    seen, best_expected = [], 0.0
+    for group in groups:
+        try:
+            lc = ts.download_light_curve(target, sectors=group)
+            again = ts.search_light_curve(lc, min_period=0.3)
+        except Exception:
+            continue
+        match = ts.period_match(again["period_days"], period, tolerance=0.01)
+        hit = again["is_candidate"] and match in ("match", "alias 2x", "alias 1/2x")
+        label = "+".join(map(str, group))
+        seen.append(f"S{label}: best {again['period_days']:.3f} d (SNR {again['detection_snr']:.1f})"
+                    + (" ✓ same period" if hit else ""))
+        if hit:
+            return "confirmed in other sectors", "Found again: " + "; ".join(seen) + "."
+        best_expected = max(best_expected, result["detection_snr"] * np.sqrt(len(group)))
+    if not seen:
+        return "inconclusive", "Other sectors exist but couldn't be searched."
+    if best_expected >= 10:
+        return "not confirmed", ("Should have been found again (expected SNR ~"
+                                 f"{best_expected:.0f}) but wasn't: " + "; ".join(seen) + ".")
+    return "inconclusive", "Other sectors too short to tell: " + "; ".join(seen) + "."
+
+
+# ---------------------------------------------------------------------------
 # All checks together
 # ---------------------------------------------------------------------------
 

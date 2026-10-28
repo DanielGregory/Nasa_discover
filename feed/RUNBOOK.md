@@ -38,9 +38,16 @@ adds the new ones, so commit that file afterwards.
    its current `version` as `if_version`, so skip duplicates instead.
 5. `python feed/outbox_tool.py sent <card ids...>` archives them.
 
-Only upload cards whose `vet_status` is a real candidate ("possible new",
-"reported", "in Gaia", "not a planet"). Never upload "known" or "artifact"
-cards; those are for the logs.
+The searches already apply the queue rules (below), so upload what's in the
+outbox. Never upload "known", "artifact", "weak" or "not confirmed" cards by
+hand; those are for the logs.
+
+Queue rules (set from the person's first reviews, Oct 28):
+- Comets: moving ≥ 3 px/h against the stars, heading toward the Sun
+  (sunward ≥ 0.3), and staying on the track (≥ 70% of frames centred).
+  Held-back movers are listed with reasons in comets/results/movers.csv.
+- Planets: only "possible new", and only if found again in another TESS
+  sector, or SNR ≥ 10 when the star has no other sectors.
 
 ## 3. Read verdicts and follow up
 

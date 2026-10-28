@@ -277,3 +277,28 @@ def classify_tracks(tracks, sun_xy, drift, star_tol=0.5, min_speed=0.6):
         + np.clip(tracks["sunward"], 0, 1) * 0.15, 3)
     tracks.loc[tracks["kind"] != "mover", "score"] = 0.0
     return tracks
+
+
+def centring(diff, hours, mover, box=6, smooth=1.2, tolerance=2.0):
+    """
+    Does one object actually follow the fitted track? In each frame, find
+    the brightest spot within `box` px of the predicted position (in the
+    smoothed difference image) and measure how far it is from that
+    position. A real mover stays within ~1 px; a track stitched from
+    unrelated spots (star residuals, noise) wanders by several px.
+    Returns (median offset in px, fraction of frames within `tolerance` px).
+    """
+    offsets = []
+    for i in range(int(mover["first_frame"]), int(mover["last_frame"]) + 1):
+        dt_h = hours[i] - mover["t_ref"]
+        x = int(round(mover["x_ref"] + mover["vx"] * dt_h))
+        y = int(round(mover["y_ref"] + mover["vy"] * dt_h))
+        if not (box <= x < diff.shape[2] - box and box <= y < diff.shape[1] - box):
+            continue
+        patch = ndimage.gaussian_filter(diff[i, y - box - 3:y + box + 4, x - box - 3:x + box + 4], smooth)[3:-3, 3:-3]
+        yy, xx = np.unravel_index(np.argmax(patch), patch.shape)
+        offsets.append(np.hypot(xx - box, yy - box))
+    if not offsets:
+        return np.nan, 0.0
+    offsets = np.array(offsets)
+    return float(np.median(offsets)), float(np.mean(offsets <= tolerance))

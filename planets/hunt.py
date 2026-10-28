@@ -41,7 +41,10 @@ def already_searched():
     if not SEARCHED.exists():
         return set()
     return set(pd.read_csv(SEARCHED)["tic"].astype(int))
-SEND_TO_QUEUE = {"possible new", "not a planet", "known neighbour"}
+# What reaches the Discovery Queue. Chosen from the first reviews: weak,
+# noise-like single-sector signals weren't worth the person's time.
+SEND_TO_QUEUE = {"possible new"}
+MIN_SNR_SINGLE_SECTOR = 10     # with nothing else to check, demand a stronger signal
 
 
 def host_targets(n, known, skip=frozenset()):
@@ -99,6 +102,17 @@ def hunt_one(target, kind):
         if result["is_candidate"]:
             try:
                 row.update(vetting.vet(result, known))
+                if row["vet_status"] == "possible new":
+                    check, note = vetting.other_sectors_check(
+                        target, result, [int(s) for s in sectors.split(",") if s])
+                    row["sector_check"] = check
+                    row["vet_notes"] = "; ".join(filter(None, [row["vet_notes"], note]))
+                    if check == "not confirmed":
+                        row["vet_status"] = "not confirmed"
+                    elif check != "confirmed in other sectors" and \
+                            result["detection_snr"] < MIN_SNR_SINGLE_SECTOR:
+                        row["vet_status"] = "weak"
+                        row["vet_notes"] += f"; SNR {result['detection_snr']:.1f} is too weak with no second sector"
             except Exception as exc:
                 row["error"] = f"vetting failed: {type(exc).__name__}: {exc}"
         rows.append(row)
