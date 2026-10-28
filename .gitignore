@@ -10,3 +10,6 @@ feed/outbox/
 comets/cache/
 comets/results/
 feed/sent/
+brown_dwarfs/cache/
+brown_dwarfs/results/
+transients/results/
