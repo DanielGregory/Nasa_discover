@@ -104,37 +104,63 @@ def stretch(image, low=1, high=99.7):
     return np.clip((image - lo) / max(hi - lo, 1e-6), 0, 1)
 
 
-def track_figure(stack, hours, frames, mover, sun_xy, path, n_cutouts=8, half=32):
-    """Full frame with the track marked, plus close-ups along the track."""
+def track_figure(stack, diff, hours, frames, mover, sun_xy, path, n_cutouts=8, half=24, zoom=55):
+    """
+    Left: a zoom around the track on the original image, with a small open
+    circle at the predicted position in every frame, and an inset of the
+    whole field showing where the zoom is. Right: close-ups following the
+    object, from the background-subtracted frames (stars and corona mostly
+    removed), each with a circle of 4 px radius drawn to scale. A real
+    mover sits in the circle in every close-up.
+    """
     first, last = int(mover["first_frame"]), int(mover["last_frame"])
     chosen = np.unique(np.linspace(first, last, min(n_cutouts, last - first + 1)).astype(int))
     mid = chosen[len(chosen) // 2]
 
-    n_cols = (len(chosen) + 1) // 2
-    fig = plt.figure(figsize=(12, 6.4))
-    grid = fig.add_gridspec(2, 1 + n_cols, width_ratios=[2.2] + [1] * n_cols)
-    ax = fig.add_subplot(grid[:, 0])
-    ax.imshow(stretch(stack[mid]) ** 0.7, cmap="gray", origin="upper")
-    t = hours[[first, last]] - mover["t_ref"]
-    xs, ys = mover["x_ref"] + mover["vx"] * t, mover["y_ref"] + mover["vy"] * t
-    ax.annotate("", xy=(xs[1], ys[1]), xytext=(xs[0], ys[0]),
-                arrowprops=dict(arrowstyle="->", color="#f0a640", lw=2))
-    ax.add_patch(plt.Circle((xs.mean(), ys.mean()), 40, fill=False, color="#f0a640", lw=1.5))
-    ax.plot(*sun_xy, "+", color="#7aa2ff", ms=10)
-    ax.set_title(f"{frames['date'].iloc[mid]:%Y-%m-%d %H:%M} UT (arrow: motion)", fontsize=10)
-    ax.axis("off")
-
-    for k, i in enumerate(chosen):
-        sub = fig.add_subplot(grid[k // n_cols, 1 + k % n_cols])   # left to right, then down
+    def predicted(i):
         dt_h = hours[i] - mover["t_ref"]
-        cx, cy = mover["x_ref"] + mover["vx"] * dt_h, mover["y_ref"] + mover["vy"] * dt_h
-        x0, y0 = int(round(cx)) - half, int(round(cy)) - half
+        return mover["x_ref"] + mover["vx"] * dt_h, mover["y_ref"] + mover["vy"] * dt_h
+
+    n_cols = (len(chosen) + 1) // 2
+    fig = plt.figure(figsize=(12, 6.2))
+    grid = fig.add_gridspec(2, 1 + n_cols, width_ratios=[2.2] + [1] * n_cols)
+
+    # Zoomed view on the original frame.
+    ax = fig.add_subplot(grid[:, 0])
+    cx, cy = predicted(mid)
+    x0, y0 = int(np.clip(cx - zoom, 0, 1024 - 2 * zoom)), int(np.clip(cy - zoom, 0, 1024 - 2 * zoom))
+    view = stack[mid][y0:y0 + 2 * zoom, x0:x0 + 2 * zoom]
+    ax.imshow(stretch(view, 2, 99.7) ** 0.8, cmap="gray", origin="upper",
+              extent=(x0 - 0.5, x0 + 2 * zoom - 0.5, y0 + 2 * zoom - 0.5, y0 - 0.5))
+    path_xy = np.array([predicted(i) for i in range(first, last + 1)])
+    ax.plot(path_xy[:, 0], path_xy[:, 1], "o", ms=7, mfc="none", mec="#f0a640", mew=1.0, alpha=0.8)
+    ax.annotate("", xy=path_xy[-1] + (path_xy[-1] - path_xy[0]) * 0.6, xytext=path_xy[-1],
+                arrowprops=dict(arrowstyle="->", color="#f0a640", lw=1.5))
+    ax.set_title(f"{frames['date'].iloc[mid]:%Y-%m-%d %H:%M} UT · circles: position in each frame",
+                 fontsize=9)
+    ax.axis("off")
+    # Inset: whole field, with a box where the zoom is.
+    inset = ax.inset_axes([0.0, 0.0, 0.3, 0.3])
+    inset.imshow(stretch(stack[mid]) ** 0.7, cmap="gray", origin="upper")
+    inset.add_patch(plt.Rectangle((x0, y0), 2 * zoom, 2 * zoom, fill=False, color="#f0a640", lw=1))
+    inset.plot(*sun_xy, "+", color="#7aa2ff", ms=5)
+    inset.set_xticks([]), inset.set_yticks([])
+
+    # Close-ups on the background-subtracted frames.
+    for k, i in enumerate(chosen):
+        sub = fig.add_subplot(grid[k // n_cols, 1 + k % n_cols])
+        px, py = predicted(i)
+        cx0, cy0 = int(round(px)) - half, int(round(py)) - half
         cut = np.zeros((2 * half, 2 * half))
-        ys_, xs_ = slice(max(y0, 0), max(min(y0 + 2 * half, 1024), 0)), slice(max(x0, 0), max(min(x0 + 2 * half, 1024), 0))
-        piece = stack[i][ys_, xs_]
-        cut[ys_.start - y0:ys_.start - y0 + piece.shape[0], xs_.start - x0:xs_.start - x0 + piece.shape[1]] = piece
-        sub.imshow(stretch(cut, 2, 99.5), cmap="gray", origin="upper")
-        sub.plot(half, half, marker="o", ms=14, mfc="none", mec="#f0a640", mew=1.2)
+        ys_ = slice(max(cy0, 0), max(min(cy0 + 2 * half, 1024), 0))
+        xs_ = slice(max(cx0, 0), max(min(cx0 + 2 * half, 1024), 0))
+        piece = diff[i][ys_, xs_]
+        cut[ys_.start - cy0:ys_.start - cy0 + piece.shape[0],
+            xs_.start - cx0:xs_.start - cx0 + piece.shape[1]] = piece
+        lim = np.percentile(np.abs(cut), 99.5) or 1
+        sub.imshow(cut, cmap="gray", origin="upper", vmin=-0.3 * lim, vmax=lim,
+                   extent=(cx0 - 0.5, cx0 + 2 * half - 0.5, cy0 + 2 * half - 0.5, cy0 - 0.5))
+        sub.add_patch(plt.Circle((px, py), 4, fill=False, color="#f0a640", lw=1.2))
         sub.set_title(f"{frames['date'].iloc[i]:%H:%M}", fontsize=8)
         sub.axis("off")
     fig.tight_layout()
@@ -172,7 +198,7 @@ def scan_chunk(frames, camera, reports):
         rows[-1]["plot"] = str(OUT / "plots" / f"{tag}.png")
         rows[-1]["id"] = cards.card_id("comet", tag)
         (OUT / "plots").mkdir(parents=True, exist_ok=True)
-        track_figure(stack, hours, frames, m, sun_xy, rows[-1]["plot"])
+        track_figure(stack, diff, hours, frames, m, sun_xy, rows[-1]["plot"])
     return rows
 
 

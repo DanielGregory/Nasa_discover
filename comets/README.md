@@ -11,6 +11,12 @@ This folder automates the first pass of what a Sungrazer hunter does by eye:
 flip through frames and look for a faint fuzzy dot moving steadily,
 differently from the stars.
 
+Each candidate card shows a zoom on the track (a small circle at the
+object's predicted position in every frame, plus an inset of the whole
+field) and close-ups from the background-subtracted frames with a
+4-pixel circle drawn to scale. A real mover sits inside the circle in every
+close-up; a star blend or a chance line-up of noise wanders out of it.
+
 ```
 soho.py       get LASCO C2/C3 frames (Helioviewer API, cached)
 track.py      remove the background, find spots, link straight-line tracks, reject stars
