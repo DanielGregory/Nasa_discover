@@ -331,6 +331,7 @@ def plot_recovery_map(results, title="", period_bins=6, radius_bins=6, ax=None):
         axis.set_major_formatter(plt.FuncFormatter(lambda v, _: f"{v:g}"))
         axis.set_minor_formatter(plt.NullFormatter())
     ax.set_xticks([t for t in (0.5, 1, 2, 3, 5, 8, 13) if p_edges[0] <= t <= p_edges[-1]])
+    ax.set_yticks([t for t in (0.3, 0.5, 1, 2, 3, 5, 8, 15) if r_edges[0] <= t <= r_edges[-1]])
     ax.set_title(title)
     plt.colorbar(mesh, ax=ax, label="Fraction recovered")
     return ax

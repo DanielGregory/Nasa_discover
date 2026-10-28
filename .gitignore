@@ -6,3 +6,4 @@ results/
 *.png
 cache/
 feed/outbox/
+!docs/*.png

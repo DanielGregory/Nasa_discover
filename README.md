@@ -13,6 +13,8 @@ transit_search.py              the whole pipeline (download → clean → BLS �
 validate_known_planets.py      runs the pipeline on known_planets.csv
 known_planets.csv              known planet hosts with their published periods
 injection_recovery.py          inject fake planets into real data, map what we recover
+vetting.py                     planet size, nearby stars, known planet/TOI/CTOI cross-match
+feed/                          the Discovery Queue page and its card format
 run_injection_recovery.py      runs injection-recovery on quiet_stars.csv
 quiet_stars.csv                test stars with no signal of their own
 notebooks/01_recover_known_planet.ipynb   step-by-step walkthrough on Pi Mensae c
@@ -234,6 +236,95 @@ a TOI (TESS Object of Interest).
 3. ✅ Injection-recovery on real light curves of quiet stars. See
    [Injection-recovery](#injection-recovery-what-could-we-have-found) below.
 4. ☐ Only then: run it on stars without known planets.
+
+## Injection-recovery: what could we have found?
+
+Finding known planets shows the pipeline *can* work. It doesn't show what
+it misses. To find out, `run_injection_recovery.py` takes real TESS light
+curves of three quiet stars that show no signal of their own:
+
+| Star | Type | Radius | 1-h noise (CDPP) |
+|---|---|---|---|
+| TIC 167006493 | solar twin (G2) | 0.98 R☉ | 59 ppm |
+| TIC 306509308 | G dwarf | 1.30 R☉ | 54 ppm |
+| TIC 273418879 | M dwarf | 0.42 R☉ | 50 ppm |
+
+It injects 300 fake planets into each star. Each fake planet has:
+- a period from 0.5 to 13 d
+- a depth from 30 to 5000 ppm
+- a random impact parameter
+- a trapezoid shape, with the duration set by Kepler's law and the star's density
+
+Then it runs the **unchanged** production search on every one.
+
+![Recovery vs planet radius](docs/injection_recovery_vs_radius.png)
+
+**Results** (one sector, P = 0.5–13 d):
+
+| | Solar twin | 1.3 R☉ G dwarf | M dwarf |
+|---|---|---|---|
+| 50% recovery radius | 1.5 R⊕ | 1.85 R⊕ | **0.58 R⊕** |
+| 50% recovery radius, P < 3 d | 1.3 R⊕ | 1.5 R⊕ | 0.5 R⊕ |
+| 50% recovery at expected SNR | 9.2 | 9.8 | 8.2 |
+| Recovered at expected SNR > 15 | 100% | 100% | 100% |
+
+What this tells us:
+- **No strong signal was missed.** All 788 injections with expected SNR > 15
+  came back at the right period and transit times. Misses happen only near
+  the detection threshold, where they should.
+- **M dwarfs are where small planets are findable.** The noise level is the
+  same, but the star is 2.3× smaller, so an Earth-sized planet makes a ~6× deeper
+  dip. Around this M dwarf, the pipeline finds 80% of 0.8 R⊕ planets. Around
+  the solar twin it finds almost none.
+- **A "nothing found" is now quantified.** With one sector of this solar
+  twin, we'd have caught 85% of 2 R⊕ planets with P < 13 d and almost all
+  planets bigger than 3 R⊕.
+- **Where sensitivity is lost.** Recovery reaches 50% at expected SNR ~9,
+  not at the threshold of 7. Detection uses blind flattening, which shrinks
+  dips by ~20–25% (see [the pipeline steps](#the-pipeline-step-by-step)).
+  Recovering that safely would lower the detection limit.
+
+<details><summary>Per-star maps (period × radius)</summary>
+
+![Solar twin](docs/injection_map_solar_twin.png)
+![M dwarf](docs/injection_map_m_dwarf.png)
+
+</details>
+
+**Bugs this test found** (both fixed, with regression tests):
+1. BLS fit 8-hour boxes to ~1-day periods, which outscored real short-period
+   transits. Fix: durations are capped at 15% of the period.
+2. The masked second pass searched again and could "re-discover" pass-1
+   noise. Fix: pass 2 only measures; it never searches.
+
+Caveats: the injections go into PDCSAP flux, which NASA has already
+detrended. So this tests our pipeline, not NASA's detrending, and it is a
+little optimistic. Each star used one sector; multi-sector and FFI data
+need their own runs.
+
+## Vetting: is it new, and could it be a planet?
+
+`vetting.py` checks every signal against:
+- **TIC stellar radius**: gives the planet radius. Anything over
+  2 R_Jupiter is a star, so the signal is flagged "not a planet".
+- **Odd/even depths**: a big difference suggests an eclipsing binary at
+  twice the period.
+- **Nearby TIC stars**: lists every star within 3 TESS pixels bright
+  enough to cause the dip by being fully eclipsed.
+- **Known signals**: confirmed planets and TOIs (NASA Exoplanet Archive)
+  and CTOIs (ExoFOP), matched by TIC ID and period, including 2× and ½×.
+  A signal on a known host *at a different period* is reported as a possible
+  extra planet, not rejected. A match on a nearby star flags contamination.
+
+## Discovery Queue (phone review)
+
+`feed/discovery_queue.html` is published as a private claude.ai page.
+Candidates from every search appear as cards: plot, key numbers,
+vetting notes and a link to ExoFOP. You mark each one **Worth a look /
+Unsure / Not real**, with optional notes. Claude reads the verdicts back,
+follows up on the promising ones and drafts reports. You submit them from
+your own accounts (ExoFOP for CTOIs).
+`feed/candidates.py` defines the card format shared by all searches.
 
 ## Data and credits
 
