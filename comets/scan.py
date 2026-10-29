@@ -35,6 +35,7 @@ import track  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "feed"))
 import candidates as cards  # noqa: E402
+import reports as report_drafts  # noqa: E402
 
 OUT = Path(__file__).resolve().parent / "results"
 MAX_SPEED = {"C2": 150.0, "C3": 40.0}       # px/hour; C2 pixels are ~5x smaller
@@ -193,8 +194,13 @@ def scan_chunk(frames, camera, reports):
         north_up = to_north_up(m["x_ref"], m["y_ref"], sun_xy, rotation)
         known = match_reports(when, north_up, reports, camera)
         offset, centred = track.centring(diff, hours, m)
+        positions = []
+        for i in range(int(m["first_frame"]), int(m["last_frame"]) + 1):
+            dt_h = hours[i] - m["t_ref"]
+            px, py = to_north_up(m["x_ref"] + m["vx"] * dt_h, m["y_ref"] + m["vy"] * dt_h, sun_xy, rotation)
+            positions.append(f"{frames['date'].iloc[i]:%H%M} {px:.0f} {py:.0f}")
         rows.append({**m.drop(labels=["detections"]).to_dict(), "camera": camera, "time": when,
-                     "median_offset_px": offset, "frac_centred": centred,
+                     "median_offset_px": offset, "frac_centred": centred, "positions": positions,
                      "x_north_up": north_up[0], "y_north_up": north_up[1],
                      "r_sun": m["r_sun_px"] * r_sun_per_px,
                      "known_reports": ", ".join(known), "sun_x": sun_xy[0], "sun_y": sun_xy[1]})
@@ -257,6 +263,8 @@ def comet_card(row):
                   {"label": "Helioviewer at this time",
                    "url": f"https://helioviewer.org/?date={row['time']:%Y-%m-%dT%H:%M:%S}.000Z&imageScale=56&imageLayers=%5BSOHO,LASCO,{row['camera']},white-light,1,100%5D"}],
         "source": f"SOHO LASCO {row['camera']} via Helioviewer",
+        "urgent": status == "possible new",
+        **({"report": report_drafts.comet_report(row)} if status == "possible new" else {}),
         "found_at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
 

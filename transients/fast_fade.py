@@ -50,6 +50,7 @@ MIN_DECLINE_SIGNIFICANCE = 3
 
 sys.path.insert(0, str(HERE.parent / "feed"))
 import candidates as cards  # noqa: E402
+import reports  # noqa: E402
 
 
 def get(path, params=None, retries=3):
@@ -197,6 +198,8 @@ def write_card(obj, lc, a):
         "links": [{"label": "ALeRCE explorer", "url": f"https://alerce.online/object/{oid}"},
                   {"label": "TNS search", "url": f"https://www.wis-tns.org/search?ra={obj['meanra']}&decl={obj['meandec']}&radius=5&coords_unit=arcsec"}],
         "source": "ZTF alerts via ALeRCE",
+        "urgent": True,
+        "report": reports.transient_report(obj, a),
         "found_at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
     cards.write_outbox(card, path)

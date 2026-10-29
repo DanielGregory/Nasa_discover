@@ -184,6 +184,34 @@ dialog button { position: absolute; top: 8px; right: 8px; border: 0; border-radi
 .guide ol { margin: 0; padding-left: 1.2em; color: var(--ink-2); font-size: 0.92rem; max-width: 70ch; }
 .guide-grid { display: grid; grid-template-columns: 1fr; gap: 18px; }
 @media (min-width: 880px) { .guide-grid { grid-template-columns: 1fr 1fr; } }
+.urgent-tag { padding: 2px 8px; border-radius: 4px; background: var(--bad-soft); color: var(--bad); font-weight: 600; }
+.report { border-top: 1px solid var(--rule); background: var(--accent-soft); }
+.report > summary { cursor: pointer; padding: 12px 16px; font: 600 0.92rem var(--font-body); color: var(--accent); }
+.report-body { padding: 0 16px 14px; display: flex; flex-direction: column; gap: 10px; }
+.report-body p { margin: 0; font-size: 0.88rem; color: var(--ink-2); }
+.fields { display: flex; flex-direction: column; gap: 6px; }
+.field { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 8px; align-items: center;
+  background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; padding: 6px 8px; }
+.field .k { grid-column: 1 / -1; font: 600 0.68rem var(--font-body); letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink-3); }
+.field .val { font: 500 0.86rem var(--font-data); overflow-wrap: anywhere; white-space: pre-wrap; min-width: 0; }
+.mini-btn { border: 1px solid var(--rule); background: var(--surface); color: var(--ink-2); font: 600 0.75rem var(--font-body);
+  padding: 6px 10px; border-radius: 6px; cursor: pointer; min-height: 32px; }
+.mini-btn.primary { background: var(--accent); color: var(--surface); border-color: var(--accent); }
+.checklist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 0.88rem; }
+.checklist li::before { content: "○ "; color: var(--ink-3); }
+.checklist li.done::before { content: "✓ "; color: var(--good); font-weight: 700; }
+.row-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.disc-card .body { gap: 10px; }
+.disc-status { display: flex; flex-wrap: wrap; gap: 6px; }
+.disc-status button[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.setup { background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 14px 16px; margin: 16px 0;
+  display: flex; flex-direction: column; gap: 10px; }
+.setup h2 { margin: 0; font: 400 1.35rem var(--font-display); }
+.setup label { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: start; font-size: 0.92rem; }
+.setup label small { display: block; color: var(--ink-2); }
+.setup input[type="checkbox"] { width: 20px; height: 20px; margin-top: 2px; accent-color: var(--good); }
+.disc-card input[type="text"] { width: 100%; border: 1px solid var(--rule); border-radius: 6px; background: var(--bg); color: var(--ink);
+  font: 0.9rem var(--font-body); padding: 8px 10px; }
 .guess-row { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .v-btn[data-pick="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
 
@@ -199,9 +227,15 @@ dialog button { position: absolute; top: 8px; right: 8px; border: 0; border-radi
     <div class="tally" id="tally"><span>Loading…</span></div>
     <div class="tabs" role="tablist">
       <button class="tab" role="tab" id="tab-queue" type="button" aria-selected="true">Queue</button>
+      <button class="tab" role="tab" id="tab-discoveries" type="button" aria-selected="false">Discoveries</button>
       <button class="tab" role="tab" id="tab-training" type="button" aria-selected="false">Training</button>
     </div>
   </header>
+
+  <section id="discoveries-view" hidden>
+    <div class="setup" id="setup"></div>
+    <main class="grid" id="disc-feed" aria-live="polite"></main>
+  </section>
 
   <section id="training-view" hidden>
     <details class="guide" id="guide" open>
@@ -401,6 +435,7 @@ function card(c) {
     el("div", { class: "card-head" },
       el("div", { class: "meta" },
         el("span", { class: "kind " + (c.kind || ""), text: KIND_LABEL[c.kind] || c.kind || "Candidate" }),
+        c.urgent ? el("span", { class: "urgent-tag", text: "Time-sensitive" }) : null,
         c.vet_status ? el("span", { class: statusClass, text: c.vet_status }) : null,
         el("span", { text: [c.source, fmtDate(c.found_at)].filter(Boolean).join(" · ") }),
       ),
@@ -419,6 +454,7 @@ function card(c) {
       c.notes ? el("p", { class: "notes", text: c.notes }) : null,
       links,
     ),
+    c.report ? reportPanel(c) : null,
     el("div", { class: "verdict" },
       el("div", { class: "verdict-row", role: "group", "aria-label": "Your verdict" }, buttons),
       note,
@@ -439,7 +475,8 @@ function renderFeed() {
       if (state.review === "todo") return !v;
       return v === state.review;
     })
-    .sort((a, b) => (Number(b.score) || 0) - (Number(a.score) || 0) || String(b.found_at).localeCompare(String(a.found_at)));
+    .sort((a, b) => (b.urgent ? 1 : 0) - (a.urgent ? 1 : 0) || (Number(b.score) || 0) - (Number(a.score) || 0)
+      || String(b.found_at).localeCompare(String(a.found_at)));
 
   if (!state.candidates.length) {
     feed.replaceChildren(el("div", { class: "empty" },
@@ -470,6 +507,125 @@ function openZoom(src, title) {
 document.getElementById("zoom-close").addEventListener("click", () => document.getElementById("zoom").close());
 document.getElementById("zoom").addEventListener("click", (e) => { if (e.target.id === "zoom") e.target.close(); });
 
+// ---------------------------------------------------------------- Reporting
+const discoveries = { items: {}, setup: {} };
+const DISC_STATUS = [["reported", "Reported"], ["confirmed", "Confirmed"], ["named", "Named"], ["rejected", "Not real"]];
+const SETUP = [
+  ["sungrazer", "Sungrazer Project contributor account", "Needed to report SOHO comets. Approval can take days, so request it now.",
+   "https://sungrazer.nrl.navy.mil/index.php/contributors/request_form"],
+  ["exofop", "ExoFOP-TESS account", "Needed to submit a planet candidate (CTOI). Free; register on the ExoFOP site.",
+   "https://exofop.ipac.caltech.edu/tess/"],
+  ["zooniverse", "Zooniverse account (Backyard Worlds)", "For reporting brown dwarf candidates and practising on the project.",
+   "https://www.zooniverse.org/projects/marckuchner/backyard-worlds-planet-9"],
+  ["tns", "Transient Name Server account (optional)", "Only for reporting fast transients.",
+   "https://www.wis-tns.org/"],
+];
+
+async function copyText(text, button) {
+  const label = button.textContent;
+  try { await navigator.clipboard.writeText(text); button.textContent = "Copied"; }
+  catch (e) {
+    const area = el("textarea", { readonly: true, style: "position:fixed;opacity:0" });
+    area.value = text; document.body.append(area); area.select();
+    button.textContent = "Selected: copy it"; setTimeout(() => area.remove(), 4000);
+  }
+  setTimeout(() => { button.textContent = label; }, 1800);
+}
+
+function reportPanel(c) {
+  const r = c.report, d = discoveries.items[c.id];
+  const fields = Array.isArray(r.fields) ? r.fields : [];
+  const all = fields.map((f) => `${f.label}: ${f.value}`).join("\n");
+  const markSubmitted = async () => {
+    if (!state.db) return;
+    try {
+      await state.db.doc("discoveries/" + c.id).set({
+        kind: c.kind, title: c.title || c.id, destination: r.destination || "", status: "reported",
+        reported_at: new Date().toISOString(), designation: "", note: "", updated_at: new Date().toISOString(),
+      });
+    } catch (e) { showBanner("Couldn't save: " + (e && e.message ? e.message : "try again")); }
+  };
+  return el("details", { class: "report", open: !d },
+    el("summary", { text: d ? `Submitted to ${r.destination} · ${DISC_STATUS.find(([v]) => v === d.status)?.[1] || d.status}`
+                            : `Report it: ${r.destination}` }),
+    el("div", { class: "report-body" },
+      r.deadline ? el("p", {}, el("b", { text: "Timing: " }), r.deadline) : null,
+      r.instructions ? el("p", { text: r.instructions }) : null,
+      Array.isArray(r.checklist) && r.checklist.length ? el("ul", { class: "checklist" },
+        r.checklist.map((it) => el("li", { class: it.done ? "done" : "", text: it.text }))) : null,
+      fields.length ? el("div", { class: "fields" }, fields.map((f) => {
+        const b = el("button", { class: "mini-btn", type: "button", text: "Copy" });
+        b.addEventListener("click", () => copyText(String(f.value), b));
+        return el("div", { class: "field" }, el("span", { class: "k", text: f.label }),
+          el("span", { class: "val", text: String(f.value) }), b);
+      })) : null,
+      el("div", { class: "row-actions" },
+        (() => { const b = el("button", { class: "mini-btn", type: "button", text: "Copy all fields" });
+                 b.addEventListener("click", () => copyText(all, b)); return b; })(),
+        /^https:\/\//.test(r.form_url || "") ? el("a", { class: "mini-btn primary", href: r.form_url, target: "_blank",
+          rel: "noopener", text: "Open the form", style: "text-decoration:none" }) : null,
+        d ? null : el("button", { class: "mini-btn", type: "button", text: "I submitted it",
+          disabled: !state.canWrite, onclick: markSubmitted }),
+      ),
+    ),
+  );
+}
+
+function renderSetup() {
+  const box = document.getElementById("setup");
+  const done = SETUP.filter(([k]) => discoveries.setup[k]).length;
+  box.replaceChildren(
+    el("h2", { text: "Get ready to report" }),
+    el("p", { style: "margin:0;color:var(--ink-2);font-size:0.92rem",
+      text: `Accounts you'll need when a real find turns up (${done} of ${SETUP.length} done). Only you can create them; tick each one off here.` }),
+    ...SETUP.map(([key, title, why, url]) => {
+      const box = el("input", { type: "checkbox", id: "setup-" + key, disabled: !state.canWrite });
+      box.checked = !!discoveries.setup[key];
+      box.addEventListener("change", async () => {
+        if (!state.db) return;
+        try { await state.db.doc("setup/accounts").set({ ...discoveries.setup, [key]: box.checked }); }
+        catch (e) { showBanner("Couldn't save: " + (e && e.message ? e.message : "try again")); }
+      });
+      return el("label", { for: "setup-" + key }, box,
+        el("span", {}, el("b", { text: title }), el("small", { text: why }),
+          el("a", { href: url, target: "_blank", rel: "noopener", text: "Open", style: "color:var(--accent);font-size:0.85rem" })));
+    }),
+  );
+}
+
+function renderDiscoveries() {
+  renderSetup();
+  const feed = document.getElementById("disc-feed");
+  const items = Object.entries(discoveries.items).sort((a, b) => String(b[1].reported_at).localeCompare(String(a[1].reported_at)));
+  if (!items.length) {
+    feed.replaceChildren(el("div", { class: "empty" }, el("h2", { text: "No discoveries reported yet" }),
+      el("p", { text: "When a candidate passes Claude's follow-up, its card gets a Report panel. After you submit it, tap “I submitted it” and it's tracked here until it's confirmed and named." })));
+    return;
+  }
+  feed.replaceChildren(...items.map(([id, d]) => {
+    const designation = el("input", { type: "text", id: "desig-" + id, placeholder: "Designation once named (e.g. SOHO-5300, CTOI 123456.01)",
+      disabled: !state.canWrite });
+    designation.value = d.designation || "";
+    const save = async (patch) => {
+      try { await state.db.doc("discoveries/" + id).update({ ...patch, updated_at: new Date().toISOString() }); }
+      catch (e) { showBanner("Couldn't save: " + (e && e.message ? e.message : "try again")); }
+    };
+    designation.addEventListener("change", () => save({ designation: designation.value }));
+    return el("article", { class: "card disc-card" },
+      el("div", { class: "card-head" },
+        el("div", { class: "meta" }, el("span", { class: "kind " + d.kind, text: KIND_LABEL[d.kind] || d.kind }),
+          el("span", { text: `${d.destination || ""} · reported ${fmtDate(d.reported_at)}` })),
+        el("h2", { text: d.title || id })),
+      el("div", { class: "body" },
+        el("div", { class: "disc-status", role: "group", "aria-label": "Status" }, DISC_STATUS.map(([v, label]) =>
+          el("button", { class: "chip", type: "button", "aria-pressed": String(d.status === v), text: label,
+            disabled: !state.canWrite, onclick: () => save({ status: v }) }))),
+        designation,
+        d.note ? el("p", { class: "notes", text: d.note }) : null),
+    );
+  }));
+}
+
 // ---------------------------------------------------------------- Training
 const training = { items: [], guesses: {}, kind: "all" };
 const TRAINING_KINDS = [["all", "All"], ["planet", "Planets"], ["comet", "Comets"], ["brown_dwarf", "Brown dwarfs"]];
@@ -479,16 +635,16 @@ const QUESTION = {
   brown_dwarf: [["yes", "Brown dwarf"], ["no", "Not one"]],
 };
 
+const VIEWS = ["queue", "discoveries", "training"];
 function showView(name) {
-  const isTraining = name === "training";
-  document.getElementById("training-view").hidden = !isTraining;
-  document.getElementById("queue-view").hidden = isTraining;
-  document.getElementById("tally").hidden = isTraining;
-  document.getElementById("tab-queue").setAttribute("aria-selected", String(!isTraining));
-  document.getElementById("tab-training").setAttribute("aria-selected", String(isTraining));
-  if (location.hash !== (isTraining ? "#training" : "")) {
-    history.replaceState(null, "", isTraining ? "#training" : location.pathname + location.search);
+  if (!VIEWS.includes(name)) name = "queue";
+  for (const v of VIEWS) {
+    document.getElementById(v + "-view").hidden = v !== name;
+    document.getElementById("tab-" + v).setAttribute("aria-selected", String(v === name));
   }
+  document.getElementById("tally").hidden = name !== "queue";
+  const hash = name === "queue" ? "" : "#" + name;
+  if (location.hash !== hash) history.replaceState(null, "", hash || location.pathname + location.search);
 }
 document.getElementById("tab-queue").addEventListener("click", () => showView("queue"));
 document.querySelectorAll("[data-zoom]").forEach((b) =>
@@ -499,7 +655,8 @@ guideEl.addEventListener("toggle", () => {
   try { localStorage.setItem("dq-guide", guideEl.open ? "open" : "closed"); } catch (e) {}
 });
 document.getElementById("tab-training").addEventListener("click", () => showView("training"));
-window.addEventListener("hashchange", () => showView(location.hash === "#training" ? "training" : "queue"));
+document.getElementById("tab-discoveries").addEventListener("click", () => showView("discoveries"));
+window.addEventListener("hashchange", () => showView(location.hash.slice(1)));
 
 function renderTrainingChips() {
   document.getElementById("training-chips").replaceChildren(...TRAINING_KINDS
@@ -625,10 +782,22 @@ async function start() {
     training.guesses = next;
     renderTraining();
   }, () => {});
+  db.collection("discoveries").limit(500).onSnapshot((snap) => {
+    const next = {};
+    for (const d of snap.docs) next[d.id] = d.data();
+    discoveries.items = next;
+    renderDiscoveries();
+    if (gotCandidates) renderFeed();
+  }, () => {});
+  db.doc("setup/accounts").onSnapshot((snap) => {
+    discoveries.setup = snap.exists ? snap.data() : {};
+    renderSetup();
+  }, () => {});
 }
 
 renderChips();
-showView(location.hash === "#training" ? "training" : "queue");
+renderDiscoveries();
+showView(location.hash.slice(1));
 if (window.claude && claude.use) start();
 else { state.loaded = true; showBanner("Open this page on claude.ai to load candidates."); renderFeed(); }
 </script>

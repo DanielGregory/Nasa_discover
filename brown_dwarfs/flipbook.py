@@ -33,6 +33,7 @@ PIXEL_ARCSEC = 2.75
 
 sys.path.insert(0, str(HERE.parent / "feed"))
 import candidates as cards  # noqa: E402
+import reports  # noqa: E402
 
 
 def cutout(ra, dec, version, band=2, size=64):
@@ -115,6 +116,7 @@ def write_card(candidate):
             {"label": "Backyard Worlds", "url": "https://www.zooniverse.org/projects/marckuchner/backyard-worlds-planet-9"},
         ],
         "source": "CatWISE2020 (IRSA) + unWISE",
+        **({"report": reports.brown_dwarf_report(candidate)} if not in_gaia else {}),
         "found_at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
     cards.write_outbox(card, plot)

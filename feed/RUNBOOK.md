@@ -16,7 +16,7 @@ pytest -q                     # must pass before trusting any search
 
 | Search | Command | Cadence | Typical time |
 |---|---|---|---|
-| Comets | `cd comets && python scan.py --hours 24` | daily | 5–10 min |
+| Comets | `cd comets && python scan.py --hours 7` | every 6 hours | 3–5 min |
 | Fast transients | `cd transients && python fast_fade.py --days 3` | daily | 1–3 min |
 | Planets | `cd planets && python hunt.py --hosts 20 --fresh 20` | weekly | 20–40 min |
 | Brown dwarfs | `cd brown_dwarfs && python search.py --tiles 3` | weekly | 15–30 min |
@@ -65,9 +65,23 @@ For each new **worth** verdict:
 - **Brown dwarf**: check SIMBAD (if reachable) and look for the object in
   later WISE epochs.
 
-If a candidate survives, draft the report text (ExoFOP CTOI, Sungrazer, or
-Backyard Worlds) in `feed/reports/<card id>.md` for the person to submit
-from their own account. Never submit anything yourself.
+If a candidate survives, make sure its card has a `report` draft (cards
+from the searches already include one; build or refresh it with
+`feed/reports.py`) and update the card with ArtifactData `update` so the
+person sees it in the card's "Report it" panel, ticking the checklist
+items you've now verified. The person submits from their own account.
+Never submit anything yourself.
+
+## 3b. Track reported discoveries
+
+ArtifactData `list` on collection `discoveries` (one document per card
+the person marked "I submitted it": `status` reported / confirmed / named /
+rejected, `designation`, `note`). For each still at "reported", look for
+news and, if found, `update` it (status, designation, and a short `note`
+saying where you saw it):
+- Comets: the Sungrazer confirmation lists and "Recent Reports" pages.
+- Planets: the star's ExoFOP-TESS page (CTOI number, promotion to TOI).
+- Transients: TNS at the position.
 
 For each **not** verdict, read the note: if it names a repeatable
 artifact type, consider a vetting rule (and a test) so the pipeline catches

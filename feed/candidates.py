@@ -33,6 +33,8 @@ from pathlib import Path
 
 import numpy as np
 
+import reports
+
 OUTBOX = Path(__file__).resolve().parent / "outbox"
 
 
@@ -97,6 +99,8 @@ def planet_card(result, vetting, source="TESS SPOC 2-min"):
             {"label": "ExoFOP", "url": f"https://exofop.ipac.caltech.edu/tess/target.php?id={tic}"},
         ],
         "source": source + (f", sector {sectors}" if sectors else ""),
+        **({"report": reports.planet_report(result, result.get("sector_check", ""))}
+           if status == "possible new" else {}),
         "found_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
 
