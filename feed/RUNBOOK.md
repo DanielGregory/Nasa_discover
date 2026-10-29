@@ -16,7 +16,7 @@ pytest -q                     # must pass before trusting any search
 
 | Search | Command | Cadence | Typical time |
 |---|---|---|---|
-| Comets | `cd comets && python scan.py --hours 7` | every 6 hours | 3–5 min |
+| Comets | `cd comets && python scan.py --hours 24` | daily | 5–10 min |
 | Fast transients | `cd transients && python fast_fade.py --days 3` | daily | 1–3 min |
 | Planets | `cd planets && python hunt.py --hosts 20 --fresh 20` | weekly | 20–40 min |
 | Brown dwarfs | `cd brown_dwarfs && python search.py --tiles 3` | weekly | 15–30 min |
